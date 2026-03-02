@@ -184,9 +184,11 @@ class StreamingVoicePipeline:
                     try:
                         logger.info(f"TTS #{job.index}: '{job.text[:50]}...' ({len(job.text)}자)")
 
+                        # voice_id를 mode로 변환 (tts_engine.synthesize는 mode 파라미터 사용)
+                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else "auto"
                         audio, sample_rate, tts_ms = await tts_engine.synthesize(
                             text=job.text,
-                            voice_id=voice_id,
+                            mode=mode,
                         )
 
                         # TTFA 측정 (첫 청크)
