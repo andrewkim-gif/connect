@@ -36,10 +36,7 @@ class TTSEngine:
 
         try:
             # 짧은 텍스트로 워밍업
-            await self.synthesize(
-                text="워밍업",
-                voice_id="gd-default",
-            )
+            await self.synthesize(text="워밍업")
             self._warmup_done = True
             logger.info("TTS engine warmup complete")
         except Exception as e:
@@ -60,24 +57,17 @@ class TTSEngine:
     async def synthesize(
         self,
         text: str,
-        voice_id: str,
         mode: str = "auto",  # "finetuned", "clone", "auto"
-        temperature: Optional[float] = None,
-        top_k: Optional[int] = None,
-        top_p: Optional[float] = None,
-        repetition_penalty: Optional[float] = None,
     ) -> Tuple[np.ndarray, int, float]:
         """
         텍스트 → 음성 합성
 
         Args:
             text: 합성할 텍스트
-            voice_id: 음성 ID (clone 모드에서 사용)
-            mode: 모델 모드 (finetuned, clone, auto)
-            temperature: 샘플링 온도 (낮을수록 일관성 ↑)
-            top_k: top-k 샘플링
-            top_p: nucleus 샘플링
-            repetition_penalty: 반복 억제
+            mode: 모델 모드
+                - finetuned: GD v5 학습 모델 (권장)
+                - clone: ICL 방식 실시간 음성 복제
+                - auto: finetuned 우선
 
         Returns:
             (audio_array, sample_rate, processing_time_ms)
@@ -97,17 +87,17 @@ class TTSEngine:
                 raise RuntimeError("Clone model not loaded. Set ENABLE_CLONE=true")
             model = model_manager.get_model("clone")
 
-        # 생성 파라미터 (config 기본값 + 요청 오버라이드)
+        # 생성 파라미터 (config 기본값 사용)
         gen_params = {
             "do_sample": settings.GEN_DO_SAMPLE,
-            "top_k": top_k if top_k is not None else settings.GEN_TOP_K,
-            "top_p": top_p if top_p is not None else settings.GEN_TOP_P,
-            "temperature": temperature if temperature is not None else settings.GEN_TEMPERATURE,
-            "repetition_penalty": repetition_penalty if repetition_penalty is not None else settings.GEN_REPETITION_PENALTY,
+            "top_k": settings.GEN_TOP_K,
+            "top_p": settings.GEN_TOP_P,
+            "temperature": settings.GEN_TEMPERATURE,
+            "repetition_penalty": settings.GEN_REPETITION_PENALTY,
             "language": settings.GEN_LANGUAGE,
         }
 
-        logger.debug(f"Generation params: {gen_params}, mode={resolved_mode}")
+        logger.debug(f"Synthesis mode={resolved_mode}")
 
         # GPU 동시 접근 제한을 위해 lock 사용
         async with self._lock:
@@ -123,8 +113,9 @@ class TTSEngine:
                     gen_params,
                 )
             else:
-                # Clone 모델: generate_voice_clone() 사용
-                voice_prompt = voice_manager.get_prompt(voice_id)
+                # Clone 모델: ICL 방식으로 generate_voice_clone() 사용
+                # voice_id 파라미터 무시, 항상 gd-clone (ICL) 사용
+                voice_prompt = voice_manager.get_prompt("gd-clone")
                 result = await loop.run_in_executor(
                     None,
                     self._synthesize_voice_clone_sync,
@@ -291,26 +282,18 @@ class TTSEngine:
         self,
         text: str,
         instruct: str,
-        voice_id: str = "gd-default",
         mode: str = "auto",  # "finetuned", "clone", "auto"
-        temperature: Optional[float] = None,
-        top_k: Optional[int] = None,
-        top_p: Optional[float] = None,
     ) -> Tuple[np.ndarray, int, float]:
         """
         하이브리드 합성: GD 목소리 + 감정/스타일 제어
 
         Fine-tuned 모델: instruct를 텍스트에 포함하여 합성
-        Clone 모델: VoiceDesign 스타일 + Voice Clone 결합
+        Clone 모델: ICL 방식으로 음성 복제 + 감정 적용
 
         Args:
             text: 합성할 텍스트
             instruct: 감정/스타일 지시 (예: "웃으면서 밝게")
-            voice_id: GD 음성 ID (clone 모드에서 사용)
             mode: 모델 모드 (finetuned, clone, auto)
-            temperature: 샘플링 온도
-            top_k: top-k 샘플링
-            top_p: nucleus 샘플링
 
         Returns:
             (audio_array, sample_rate, processing_time_ms)
@@ -333,9 +316,9 @@ class TTSEngine:
 
             gen_params = {
                 "do_sample": settings.GEN_DO_SAMPLE,
-                "top_k": top_k if top_k is not None else settings.GEN_TOP_K,
-                "top_p": top_p if top_p is not None else settings.GEN_TOP_P,
-                "temperature": temperature if temperature is not None else settings.GEN_TEMPERATURE,
+                "top_k": settings.GEN_TOP_K,
+                "top_p": settings.GEN_TOP_P,
+                "temperature": settings.GEN_TEMPERATURE,
                 "language": settings.GEN_LANGUAGE,
             }
 
@@ -354,10 +337,8 @@ class TTSEngine:
                     gen_params,
                 )
             else:
-                # Clone 모델: voice clone prompt 사용
-                gd_voice_prompt = voice_manager.get_prompt(voice_id)
-                if gd_voice_prompt is None:
-                    raise RuntimeError(f"Voice prompt not found for {voice_id}")
+                # Clone 모델: ICL 방식으로 voice clone prompt 사용
+                gd_voice_prompt = voice_manager.get_prompt("gd-clone")
 
                 result = await loop.run_in_executor(
                     None,

@@ -160,8 +160,8 @@ class ModelManager:
         return model_key in self.models
 
     def is_loaded(self) -> bool:
-        """기본 모델 로드 상태 확인 (하위 호환성)"""
-        return "base" in self.models
+        """모델 로드 상태 확인 (finetuned 또는 clone 중 하나라도 로드되면 True)"""
+        return self.has_finetuned() or self.has_clone() or "base" in self.models
 
     def list_models(self) -> list[str]:
         """로드된 모델 목록"""

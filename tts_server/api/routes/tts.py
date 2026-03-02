@@ -14,6 +14,7 @@ from models.request import SynthesizeRequest, StyleSynthesizeRequest, HybridSynt
 from models.response import ErrorCode
 from services.tts_engine import tts_engine
 from services.voice_manager import voice_manager
+from services.model_manager import model_manager
 from api.deps import verify_api_key, check_rate_limit_synthesize
 from config import settings
 
@@ -66,28 +67,13 @@ async def synthesize(
             },
         )
 
-    # 음성 ID 검증
-    if not voice_manager.has_voice(request.voice_id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": ErrorCode.VOICE_NOT_FOUND,
-                "message": f"Voice not found: {request.voice_id}",
-                "detail": "Available voices: gd-default, gd-icl",
-                "request_id": request_id,
-            },
-        )
-
     try:
-        # TTS 합성 (생성 파라미터 전달)
+        # TTS 합성
+        # finetuned: 학습된 GD 목소리 사용
+        # clone: ICL 방식 음성 복제 (gd-clone 자동 사용)
         audio, sample_rate, processing_time = await tts_engine.synthesize(
             text=request.text,
-            voice_id=request.voice_id,
             mode=request.mode.value,  # ModelMode enum → str
-            temperature=request.temperature,
-            top_k=request.top_k,
-            top_p=request.top_p,
-            repetition_penalty=request.repetition_penalty,
         )
 
         duration = tts_engine.get_audio_duration(audio, sample_rate)
@@ -95,7 +81,6 @@ async def synthesize(
         logger.info(
             f"[{request_id}] Synthesized: "
             f"mode={request.mode.value}, "
-            f"voice={request.voice_id}, "
             f"text_len={len(request.text)}, "
             f"duration={duration:.2f}s, "
             f"time={processing_time:.0f}ms"
@@ -106,7 +91,6 @@ async def synthesize(
             "X-Audio-Duration": str(round(duration, 3)),
             "X-Processing-Time": str(int(processing_time)),
             "X-Sample-Rate": str(sample_rate),
-            "X-Voice-ID": request.voice_id,
             "X-Model-Mode": request.mode.value,
             "X-Request-ID": request_id,
         }
@@ -176,8 +160,6 @@ async def synthesize_with_style(
     - "차분하고 나직한 목소리로 말하세요"
     - "신나고 흥분된 목소리로 말하세요"
     """
-    import uuid
-
     request_id = getattr(http_request.state, "request_id", str(uuid.uuid4())[:8])
 
     # VoiceDesign 모델 확인
@@ -329,11 +311,7 @@ async def synthesize_hybrid(
         audio, sample_rate, processing_time = await tts_engine.synthesize_hybrid(
             text=request.text,
             instruct=request.instruct,
-            voice_id=request.voice_id,
             mode=request.mode.value,  # ModelMode enum → str
-            temperature=request.temperature,
-            top_k=request.top_k,
-            top_p=request.top_p,
         )
 
         duration = tts_engine.get_audio_duration(audio, sample_rate)
@@ -350,7 +328,7 @@ async def synthesize_hybrid(
             "X-Audio-Duration": str(round(duration, 3)),
             "X-Processing-Time": str(int(processing_time)),
             "X-Sample-Rate": str(sample_rate),
-            "X-Voice-ID": request.voice_id,
+            "X-Model-Mode": request.mode.value,
             "X-Synthesis-Mode": "hybrid",
             "X-Request-ID": request_id,
         }

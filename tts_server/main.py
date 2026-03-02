@@ -90,38 +90,30 @@ async def lifespan(app: FastAPI):
                 model_type="voice_design",
             )
 
-        # 3. 음성 프로필 등록
-        logger.info("[3/6] Registering voice profiles...")
+        # 3. 음성 프로필 등록 (clone 모드용 - ICL만 사용)
+        logger.info("[3/6] Registering voice profile for clone mode (ICL only)...")
 
-        # Voice Clone 모드용 프로필 등록 (ref_audio 기반)
+        # ICL 모드만 사용 (고품질)
         gd_ref_text = "네. 네. 또 미체라는 철학과의 사상 중에 가장 대표 되는 개념인데. 신은 동안 저를 좀."
 
         voice_manager.register_voice(
-            voice_id="gd-default",
-            name="G-Dragon (X-Vector)",
-            mode="x_vector",
-            description="X-Vector 모드 (빠름, 런타임 클로닝)",
-            sample_path=settings.GD_SAMPLE_PATH,
-        )
-        voice_manager.register_voice(
-            voice_id="gd-icl",
-            name="G-Dragon (ICL)",
+            voice_id="gd-clone",
+            name="G-Dragon (ICL Clone)",
             mode="icl",
-            description="ICL 모드 (높은 품질, ref_text 사용)",
+            description="ICL 모드 음성 복제 (고품질)",
             sample_path=settings.GD_SAMPLE_PATH,
             ref_text=gd_ref_text,
         )
 
         # 4. Voice Clone 모델용 프롬프트 캐싱
         if settings.ENABLE_CLONE:
-            logger.info("[4/6] Caching voice prompts for clone mode...")
+            logger.info("[4/6] Caching voice prompt for clone mode (ICL)...")
             clone_model = model_manager.get_model("clone")
-            for voice_id in ["gd-default", "gd-icl"]:
-                await voice_manager.cache_prompt(
-                    voice_id=voice_id,
-                    model=clone_model,
-                    prompts_dir=settings.VOICE_PROMPTS_DIR,
-                )
+            await voice_manager.cache_prompt(
+                voice_id="gd-clone",
+                model=clone_model,
+                prompts_dir=settings.VOICE_PROMPTS_DIR,
+            )
         else:
             logger.info("[4/6] Skipping voice prompt caching (clone mode disabled)")
 

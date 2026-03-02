@@ -78,8 +78,8 @@ class Settings(BaseSettings):
             os.path.dirname(__file__), "data", "prompts"
         )
     )
-    # GD 음성 샘플 경로 (기존 샘플 사용)
-    GD_SAMPLE_PATH: str = "/home/nexus/connect/server/sample/kf9yT7Aa1RY.wav"
+    # GD 음성 샘플 경로 (ICL 클로닝용)
+    GD_SAMPLE_PATH: str = "/home/nexus/connect/server/sample/000.wav"
 
     # === Audio ===
     SAMPLE_RATE: int = 24000
