@@ -82,11 +82,17 @@ async def handle_voice_input(
 
     # 오디오 길이 검증 (16kHz, 16-bit = 32000 bytes/sec)
     max_bytes = settings.VOICE_CALL_MAX_AUDIO_LENGTH * 32000
-    if len(audio_bytes) > max_bytes:
+    audio_length = len(audio_bytes)
+    estimated_seconds = audio_length / 32000
+
+    logger.info(f"[{client_id}] Audio received: {audio_length} bytes ({estimated_seconds:.1f}s), limit: {max_bytes} bytes ({settings.VOICE_CALL_MAX_AUDIO_LENGTH}s)")
+
+    if audio_length > max_bytes:
+        logger.warning(f"[{client_id}] Audio too long: {audio_length} bytes > {max_bytes} bytes ({estimated_seconds:.1f}s > {settings.VOICE_CALL_MAX_AUDIO_LENGTH}s)")
         await connection_manager.send_json(client_id, {
             "type": "error",
             "code": VoiceCallCloseCode.AUDIO_TOO_LONG,
-            "message": f"Audio exceeds {settings.VOICE_CALL_MAX_AUDIO_LENGTH}s limit",
+            "message": f"Audio exceeds {settings.VOICE_CALL_MAX_AUDIO_LENGTH}s limit ({estimated_seconds:.1f}s received)",
         })
         return
 
@@ -289,7 +295,7 @@ async def websocket_voice_call(
 
                     # TTS 생성
                     try:
-                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else "auto"
+                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else ("clone" if voice_id in ["gd-icl", "clone"] else "auto")
                         audio_array, sample_rate, processing_time = await tts_engine.synthesize(
                             text=greeting_text,
                             mode=mode,
@@ -422,7 +428,7 @@ async def websocket_voice_call(
                     # 3. TTS 생성 및 스트리밍
                     try:
                         # voice_id가 "finetuned"가 아니면 "auto" 사용
-                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else "auto"
+                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else ("clone" if voice_id in ["gd-icl", "clone"] else "auto")
                         audio_array, sample_rate, processing_time = await tts_engine.synthesize(
                             text=greeting_text,
                             mode=mode,

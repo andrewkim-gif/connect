@@ -188,6 +188,20 @@ class STTEngine:
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
+        # 오디오 품질 분석 (디버깅용)
+        audio_duration = len(audio_int16) / sample_rate
+        audio_rms = np.sqrt(np.mean(audio_float32 ** 2))
+        audio_peak = np.abs(audio_float32).max()
+
+        logger.info(
+            f"STT Input: {len(audio_bytes)} bytes, {audio_duration:.2f}s @ {sample_rate}Hz, "
+            f"RMS={audio_rms:.4f}, Peak={audio_peak:.4f}"
+        )
+
+        # 오디오가 너무 조용한 경우 경고
+        if audio_rms < 0.01:
+            logger.warning(f"STT: Audio too quiet (RMS={audio_rms:.4f}), may fail to recognize")
+
         # 리샘플링 필요 시 (16kHz가 아닌 경우)
         if sample_rate != 16000:
             audio_float32 = self._resample(audio_float32, sample_rate, 16000)

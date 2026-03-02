@@ -185,7 +185,15 @@ class StreamingVoicePipeline:
                         logger.info(f"TTS #{job.index}: '{job.text[:50]}...' ({len(job.text)}자)")
 
                         # voice_id를 mode로 변환 (tts_engine.synthesize는 mode 파라미터 사용)
-                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else "auto"
+                        # gd-default/finetuned → finetuned 모드 (v5 파인튜닝 모델)
+                        # gd-icl/clone → clone 모드 (ICL 음성 복제)
+                        # 그 외 → auto (finetuned 우선)
+                        if voice_id in ["gd-default", "finetuned"]:
+                            mode = "finetuned"
+                        elif voice_id in ["gd-icl", "clone"]:
+                            mode = "clone"
+                        else:
+                            mode = "auto"
                         audio, sample_rate, tts_ms = await tts_engine.synthesize(
                             text=job.text,
                             mode=mode,
