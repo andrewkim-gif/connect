@@ -246,7 +246,84 @@ async def websocket_voice_call(
 
                 msg_type = data.get("type")
 
-                if msg_type == "voice_input":
+                if msg_type == "start_call":
+                    # 통화 시작 요청 - 클라이언트가 링톤 재생 시작
+                    voice_id = data.get("voice_id", "gd-default")
+                    logger.info(f"[{client_id}] Call started with voice_id={voice_id}")
+
+                    # 1. call_started 응답 (클라이언트가 링톤 재생)
+                    await connection_manager.send_json(client_id, {
+                        "type": "call_started",
+                        "voice_id": voice_id,
+                    })
+
+                    # 2. 링톤 시간 후 자동으로 greeting 생성 (2-4초 대기)
+                    import asyncio
+                    import random
+                    ring_duration = 2.0 + random.random() * 2.0  # 2-4초
+                    await asyncio.sleep(ring_duration)
+
+                    # 3. 인사말 TTS 생성
+                    import numpy as np
+                    from services.tts_engine import tts_engine
+
+                    greetings = [
+                        "응~ 안녕? 무슨 일이야?",
+                        "어 안녕! 왜 전화했어?",
+                        "응 나야~ 뭐야?",
+                        "여보세요? 아 안녕!",
+                    ]
+                    greeting_text = random.choice(greetings)
+
+                    # 응답 시작
+                    await connection_manager.send_json(client_id, {
+                        "type": "response_start",
+                    })
+
+                    # 텍스트 전송
+                    await connection_manager.send_json(client_id, {
+                        "type": "response_text",
+                        "text": greeting_text,
+                        "is_final": True,
+                    })
+
+                    # TTS 생성
+                    try:
+                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else "auto"
+                        audio_array, sample_rate, processing_time = await tts_engine.synthesize(
+                            text=greeting_text,
+                            mode=mode,
+                        )
+                        if audio_array is not None and connection_manager.get_connection(client_id):
+                            # Float32 → Int16 PCM 변환
+                            audio_int16 = (audio_array * 32767).astype(np.int16)
+                            audio_bytes = audio_int16.tobytes()
+
+                            # 청크 단위로 전송 (100ms at 24kHz)
+                            chunk_size = 4800
+                            for i in range(0, len(audio_bytes), chunk_size):
+                                chunk = audio_bytes[i:i+chunk_size]
+                                if connection_manager.get_connection(client_id):
+                                    await connection_manager.send_bytes(client_id, chunk)
+                                else:
+                                    break
+
+                            logger.info(f"[{client_id}] Greeting TTS: '{greeting_text}' ({processing_time:.0f}ms)")
+                    except Exception as e:
+                        logger.error(f"[{client_id}] Greeting TTS error: {e}")
+
+                    # 응답 완료 + listening 상태로 전환
+                    await connection_manager.send_json(client_id, {
+                        "type": "response_end",
+                        "metrics": {"type": "greeting"},
+                    })
+
+                    # listening 상태 알림 (클라이언트가 녹음 시작)
+                    await connection_manager.send_json(client_id, {
+                        "type": "listening",
+                    })
+
+                elif msg_type == "voice_input":
                     audio_base64 = data.get("audio")
                     if not audio_base64:
                         await connection_manager.send_json(client_id, {
@@ -261,6 +338,29 @@ async def websocket_voice_call(
                         audio_base64=audio_base64,
                         voice_id=data.get("voice_id"),
                     )
+
+                elif msg_type == "audio_chunk":
+                    # 스트리밍 오디오 청크 수신 - 버퍼에 누적
+                    audio_base64 = data.get("audio")
+                    if audio_base64:
+                        if not hasattr(websocket, '_audio_buffer'):
+                            websocket._audio_buffer = []
+                        websocket._audio_buffer.append(audio_base64)
+
+                elif msg_type == "audio_end":
+                    # 발화 종료 - 버퍼의 오디오 처리
+                    if hasattr(websocket, '_audio_buffer') and websocket._audio_buffer:
+                        # 모든 청크를 합쳐서 처리
+                        combined_audio = ''.join(websocket._audio_buffer)
+                        websocket._audio_buffer = []
+
+                        await handle_voice_input(
+                            client_id=client_id,
+                            audio_base64=combined_audio,
+                            voice_id=data.get("voice_id"),
+                        )
+                    else:
+                        logger.warning(f"[{client_id}] audio_end received but no audio buffer")
 
                 elif msg_type == "interrupt":
                     reason = data.get("reason", "manual")
@@ -404,6 +504,16 @@ async def websocket_voice_call(
                                 })
                     except Exception as e:
                         logger.error(f"[{client_id}] GD Initiative error: {e}")
+
+                elif msg_type == "end_call":
+                    # 통화 종료 요청
+                    logger.info(f"[{client_id}] End call requested")
+                    if pipeline.is_processing:
+                        pipeline.interrupt()
+                    await connection_manager.send_json(client_id, {
+                        "type": "call_ended",
+                    })
+                    break  # WebSocket 연결 종료
 
                 else:
                     await connection_manager.send_json(client_id, {
