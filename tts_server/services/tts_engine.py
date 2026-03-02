@@ -1,0 +1,444 @@
+"""
+TTS Engine - 음성 합성 엔진
+생성 파라미터 지원 (temperature, top_k, top_p 등)
+
+Supports:
+- Fine-tuned model (GD v5): generate_custom_voice()
+- Base model: generate_voice_clone() with voice_clone_prompt
+"""
+
+import time
+import logging
+import asyncio
+import numpy as np
+from typing import Tuple, Optional, Any, Dict
+
+from services.model_manager import model_manager
+from services.voice_manager import voice_manager
+from config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class TTSEngine:
+    """TTS 합성 엔진"""
+
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._warmup_done = False
+
+    async def warmup(self) -> None:
+        """모델 워밍업 (CUDA 커널 컴파일)"""
+        if self._warmup_done:
+            return
+
+        logger.info("Warming up TTS engine...")
+
+        try:
+            # 짧은 텍스트로 워밍업
+            await self.synthesize(
+                text="워밍업",
+                voice_id="gd-default",
+            )
+            self._warmup_done = True
+            logger.info("TTS engine warmup complete")
+        except Exception as e:
+            logger.warning(f"Warmup failed: {e}")
+
+    def _resolve_mode(self, mode: str) -> str:
+        """모드 해석: auto → 실제 모드로 변환"""
+        if mode == "auto":
+            # Fine-tuned 우선, 없으면 clone
+            if model_manager.has_finetuned():
+                return "finetuned"
+            elif model_manager.has_clone():
+                return "clone"
+            else:
+                raise RuntimeError("No TTS model available")
+        return mode
+
+    async def synthesize(
+        self,
+        text: str,
+        voice_id: str,
+        mode: str = "auto",  # "finetuned", "clone", "auto"
+        temperature: Optional[float] = None,
+        top_k: Optional[int] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
+    ) -> Tuple[np.ndarray, int, float]:
+        """
+        텍스트 → 음성 합성
+
+        Args:
+            text: 합성할 텍스트
+            voice_id: 음성 ID (clone 모드에서 사용)
+            mode: 모델 모드 (finetuned, clone, auto)
+            temperature: 샘플링 온도 (낮을수록 일관성 ↑)
+            top_k: top-k 샘플링
+            top_p: nucleus 샘플링
+            repetition_penalty: 반복 억제
+
+        Returns:
+            (audio_array, sample_rate, processing_time_ms)
+        """
+        start_time = time.time()
+
+        # 모드 결정
+        resolved_mode = self._resolve_mode(mode)
+
+        # 모델 선택
+        if resolved_mode == "finetuned":
+            if not model_manager.has_finetuned():
+                raise RuntimeError("Fine-tuned model not loaded. Set ENABLE_FINETUNED=true")
+            model = model_manager.get_model("finetuned")
+        else:
+            if not model_manager.has_clone():
+                raise RuntimeError("Clone model not loaded. Set ENABLE_CLONE=true")
+            model = model_manager.get_model("clone")
+
+        # 생성 파라미터 (config 기본값 + 요청 오버라이드)
+        gen_params = {
+            "do_sample": settings.GEN_DO_SAMPLE,
+            "top_k": top_k if top_k is not None else settings.GEN_TOP_K,
+            "top_p": top_p if top_p is not None else settings.GEN_TOP_P,
+            "temperature": temperature if temperature is not None else settings.GEN_TEMPERATURE,
+            "repetition_penalty": repetition_penalty if repetition_penalty is not None else settings.GEN_REPETITION_PENALTY,
+            "language": settings.GEN_LANGUAGE,
+        }
+
+        logger.debug(f"Generation params: {gen_params}, mode={resolved_mode}")
+
+        # GPU 동시 접근 제한을 위해 lock 사용
+        async with self._lock:
+            loop = asyncio.get_event_loop()
+
+            if resolved_mode == "finetuned":
+                # Fine-tuned 모델: generate_custom_voice() 사용
+                result = await loop.run_in_executor(
+                    None,
+                    self._synthesize_finetuned_sync,
+                    model,
+                    text,
+                    gen_params,
+                )
+            else:
+                # Clone 모델: generate_voice_clone() 사용
+                voice_prompt = voice_manager.get_prompt(voice_id)
+                result = await loop.run_in_executor(
+                    None,
+                    self._synthesize_voice_clone_sync,
+                    model,
+                    text,
+                    voice_prompt,
+                    gen_params,
+                )
+
+        audio, sample_rate = result
+        processing_time = (time.time() - start_time) * 1000
+
+        logger.info(
+            f"Synthesized ({resolved_mode}): {len(text)} chars → "
+            f"{len(audio)/sample_rate:.2f}s audio "
+            f"({processing_time:.0f}ms)"
+        )
+
+        return audio, sample_rate, processing_time
+
+    def _synthesize_finetuned_sync(
+        self,
+        model: Any,
+        text: str,
+        gen_params: Dict[str, Any],
+    ) -> Tuple[np.ndarray, int]:
+        """동기 합성 - Fine-tuned 모델 (GD v5)"""
+        result = model.generate_custom_voice(
+            text=text,
+            speaker=settings.FINETUNED_SPEAKER,  # "gd"
+            language=gen_params.get("language", "Korean"),
+        )
+
+        audio_list, sample_rate = result
+        audio = audio_list[0]
+
+        if isinstance(audio, np.ndarray):
+            return audio, sample_rate
+
+        return np.array(audio), sample_rate
+
+    def _synthesize_voice_clone_sync(
+        self,
+        model: Any,
+        text: str,
+        voice_prompt: Any,
+        gen_params: Dict[str, Any],
+    ) -> Tuple[np.ndarray, int]:
+        """동기 합성 - Voice Clone 모드 (Base 모델)"""
+        result = model.generate_voice_clone(
+            text=text,
+            voice_clone_prompt=voice_prompt,
+            language=gen_params.get("language"),
+            do_sample=gen_params.get("do_sample", True),
+            top_k=gen_params.get("top_k", 50),
+            top_p=gen_params.get("top_p", 0.9),
+            temperature=gen_params.get("temperature", 0.7),
+            repetition_penalty=gen_params.get("repetition_penalty", 1.1),
+        )
+
+        audio_list, sample_rate = result
+        audio = audio_list[0]
+
+        if isinstance(audio, np.ndarray):
+            return audio, sample_rate
+
+        return np.array(audio), sample_rate
+
+    def get_audio_duration(self, audio: np.ndarray, sample_rate: int) -> float:
+        """오디오 길이 (초)"""
+        return len(audio) / sample_rate
+
+    async def synthesize_with_style(
+        self,
+        text: str,
+        instruct: str,
+        temperature: Optional[float] = None,
+        top_k: Optional[int] = None,
+        top_p: Optional[float] = None,
+    ) -> Tuple[np.ndarray, int, float]:
+        """
+        VoiceDesign 모델로 스타일/감정 제어 합성
+
+        Args:
+            text: 합성할 텍스트
+            instruct: 자연어 스타일 지시 (예: "밝고 활기찬 목소리로", "웃으면서 말하는 듯한")
+            temperature: 샘플링 온도
+            top_k: top-k 샘플링
+            top_p: nucleus 샘플링
+
+        Returns:
+            (audio_array, sample_rate, processing_time_ms)
+        """
+        if not model_manager.has_model("voice_design"):
+            raise RuntimeError("VoiceDesign model not loaded. Enable ENABLE_VOICE_DESIGN in config.")
+
+        async with self._lock:
+            start_time = time.time()
+
+            model = model_manager.get_model("voice_design")
+
+            gen_params = {
+                "do_sample": settings.GEN_DO_SAMPLE,
+                "top_k": top_k if top_k is not None else settings.GEN_TOP_K,
+                "top_p": top_p if top_p is not None else settings.GEN_TOP_P,
+                "temperature": temperature if temperature is not None else settings.GEN_TEMPERATURE,
+                "language": settings.GEN_LANGUAGE,
+            }
+
+            logger.debug(f"VoiceDesign params: instruct='{instruct[:50]}...', {gen_params}")
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                self._synthesize_voice_design_sync,
+                model,
+                text,
+                instruct,
+                gen_params,
+            )
+
+            audio, sample_rate = result
+            processing_time = (time.time() - start_time) * 1000
+
+            logger.info(
+                f"VoiceDesign synthesized: {len(text)} chars → "
+                f"{len(audio)/sample_rate:.2f}s audio "
+                f"({processing_time:.0f}ms)"
+            )
+
+            return audio, sample_rate, processing_time
+
+    def _synthesize_voice_design_sync(
+        self,
+        model: Any,
+        text: str,
+        instruct: str,
+        gen_params: Dict[str, Any],
+    ) -> Tuple[np.ndarray, int]:
+        """동기 VoiceDesign 합성"""
+        result = model.generate_voice_design(
+            text=text,
+            instruct=instruct,
+            language=gen_params.get("language", "Korean"),
+            do_sample=gen_params.get("do_sample", True),
+            top_k=gen_params.get("top_k", 50),
+            top_p=gen_params.get("top_p", 0.9),
+            temperature=gen_params.get("temperature", 0.7),
+        )
+
+        audio_list, sample_rate = result
+        audio = audio_list[0]
+
+        if isinstance(audio, np.ndarray):
+            return audio, sample_rate
+
+        return np.array(audio), sample_rate
+
+    def has_voice_design(self) -> bool:
+        """VoiceDesign 모델 사용 가능 여부"""
+        return model_manager.has_model("voice_design")
+
+    async def synthesize_hybrid(
+        self,
+        text: str,
+        instruct: str,
+        voice_id: str = "gd-default",
+        mode: str = "auto",  # "finetuned", "clone", "auto"
+        temperature: Optional[float] = None,
+        top_k: Optional[int] = None,
+        top_p: Optional[float] = None,
+    ) -> Tuple[np.ndarray, int, float]:
+        """
+        하이브리드 합성: GD 목소리 + 감정/스타일 제어
+
+        Fine-tuned 모델: instruct를 텍스트에 포함하여 합성
+        Clone 모델: VoiceDesign 스타일 + Voice Clone 결합
+
+        Args:
+            text: 합성할 텍스트
+            instruct: 감정/스타일 지시 (예: "웃으면서 밝게")
+            voice_id: GD 음성 ID (clone 모드에서 사용)
+            mode: 모델 모드 (finetuned, clone, auto)
+            temperature: 샘플링 온도
+            top_k: top-k 샘플링
+            top_p: nucleus 샘플링
+
+        Returns:
+            (audio_array, sample_rate, processing_time_ms)
+        """
+        async with self._lock:
+            start_time = time.time()
+
+            # 모드 결정
+            resolved_mode = self._resolve_mode(mode)
+
+            # 모델 선택
+            if resolved_mode == "finetuned":
+                if not model_manager.has_finetuned():
+                    raise RuntimeError("Fine-tuned model not loaded")
+                model = model_manager.get_model("finetuned")
+            else:
+                if not model_manager.has_clone():
+                    raise RuntimeError("Clone model not loaded")
+                model = model_manager.get_model("clone")
+
+            gen_params = {
+                "do_sample": settings.GEN_DO_SAMPLE,
+                "top_k": top_k if top_k is not None else settings.GEN_TOP_K,
+                "top_p": top_p if top_p is not None else settings.GEN_TOP_P,
+                "temperature": temperature if temperature is not None else settings.GEN_TEMPERATURE,
+                "language": settings.GEN_LANGUAGE,
+            }
+
+            logger.info(f"Hybrid synthesis: instruct='{instruct[:30]}...', text='{text[:30]}...', mode={resolved_mode}")
+
+            loop = asyncio.get_event_loop()
+
+            if resolved_mode == "finetuned":
+                # Fine-tuned 모델: instruct를 텍스트에 포함
+                result = await loop.run_in_executor(
+                    None,
+                    self._synthesize_hybrid_finetuned_sync,
+                    model,
+                    text,
+                    instruct,
+                    gen_params,
+                )
+            else:
+                # Clone 모델: voice clone prompt 사용
+                gd_voice_prompt = voice_manager.get_prompt(voice_id)
+                if gd_voice_prompt is None:
+                    raise RuntimeError(f"Voice prompt not found for {voice_id}")
+
+                result = await loop.run_in_executor(
+                    None,
+                    self._synthesize_hybrid_voice_clone_sync,
+                    model,
+                    text,
+                    instruct,
+                    gen_params,
+                    gd_voice_prompt,
+                )
+
+            audio, sample_rate = result
+            processing_time = (time.time() - start_time) * 1000
+
+            logger.info(
+                f"Hybrid synthesized ({resolved_mode}): {len(text)} chars → "
+                f"{len(audio)/sample_rate:.2f}s audio "
+                f"({processing_time:.0f}ms)"
+            )
+
+            return audio, sample_rate, processing_time
+
+    def _synthesize_hybrid_finetuned_sync(
+        self,
+        model: Any,
+        text: str,
+        instruct: str,
+        gen_params: Dict[str, Any],
+    ) -> Tuple[np.ndarray, int]:
+        """동기 하이브리드 합성 - Fine-tuned 모델"""
+        language = gen_params.get("language", "Korean")
+
+        # 감정 힌트를 텍스트 앞에 추가
+        emotion_text = f"[{instruct}] {text}"
+
+        logger.debug(f"Hybrid (finetuned): emotion_text='{emotion_text[:50]}...'")
+
+        wavs, sample_rate = model.generate_custom_voice(
+            text=emotion_text,
+            speaker=settings.FINETUNED_SPEAKER,
+            language=language,
+        )
+
+        audio = wavs[0]
+        if isinstance(audio, np.ndarray):
+            return audio, sample_rate
+
+        return np.array(audio), sample_rate
+
+    def _synthesize_hybrid_voice_clone_sync(
+        self,
+        model: Any,
+        text: str,
+        instruct: str,
+        gen_params: Dict[str, Any],
+        gd_voice_prompt: Any,
+    ) -> Tuple[np.ndarray, int]:
+        """동기 하이브리드 합성 - Voice Clone 모드"""
+        language = gen_params.get("language", "Korean")
+
+        # 감정 힌트를 텍스트 앞에 추가
+        emotion_text = f"[{instruct}] {text}"
+
+        logger.debug(f"Hybrid (voice_clone): emotion_text='{emotion_text[:50]}...'")
+
+        wavs, sample_rate = model.generate_voice_clone(
+            text=emotion_text,
+            language=language,
+            voice_clone_prompt=gd_voice_prompt,
+            do_sample=gen_params.get("do_sample", True),
+            top_k=gen_params.get("top_k", 50),
+            top_p=gen_params.get("top_p", 0.9),
+            temperature=gen_params.get("temperature", 0.7),
+        )
+
+        audio = wavs[0]
+        if isinstance(audio, np.ndarray):
+            return audio, sample_rate
+
+        return np.array(audio), sample_rate
+
+
+# 싱글톤 인스턴스
+tts_engine = TTSEngine()

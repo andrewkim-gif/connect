@@ -1,0 +1,30 @@
+# GD Voice Clone TTS Server Dependencies
+
+# FastAPI + Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# TTS Model
+qwen-tts>=0.1.0
+torch>=2.0.0
+flash-attn>=2.0.0
+
+# Audio Processing
+soundfile>=0.12.0
+numpy>=1.24.0
+
+# Utilities
+python-multipart>=0.0.9  # For file uploads
+
+# Voice Call (STT → LLM → TTS)
+faster-whisper>=1.0.0  # STT Engine (CTranslate2-optimized Whisper)
+google-genai>=0.1.0    # Gemini API Client
+librosa>=0.10.0        # Audio resampling (optional, scipy fallback available)
+
+# Streamlit Test App
+streamlit>=1.35.0
+websockets>=12.0
+streamlit-webrtc>=0.47.0  # 실시간 마이크 입력 (optional)
+av>=12.0.0                 # 오디오 처리 for webrtc (optional)

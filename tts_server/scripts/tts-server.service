@@ -1,0 +1,31 @@
+[Unit]
+Description=GD Voice Clone TTS Server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nexus
+Group=nexus
+WorkingDirectory=/home/nexus/connect/server/tts_server
+Environment="PATH=/home/nexus/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/nexus/connect/server/tts_server"
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 5002
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# 메모리 제한 (GPU 서버에서는 높게)
+# MemoryLimit=16G
+
+# 로그
+StandardOutput=append:/var/log/tts-server/server.log
+StandardError=append:/var/log/tts-server/error.log
+
+# 프로세스 관리
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=Ngrok Tunnel for TTS Server
+After=network.target tts-server.service
+Wants=tts-server.service
+
+[Service]
+Type=simple
+User=nexus
+Group=nexus
+ExecStart=/usr/local/bin/ngrok start tts-api --config=/home/nexus/.config/ngrok/ngrok.yml
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# 로그
+StandardOutput=append:/var/log/tts-server/ngrok.log
+StandardError=append:/var/log/tts-server/ngrok-error.log
+
+[Install]
+WantedBy=multi-user.target

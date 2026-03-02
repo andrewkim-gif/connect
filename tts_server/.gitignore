@@ -1,0 +1,54 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Audio files
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# Models (large files)
+models/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Voice samples
+voices/gd/samples/*.wav
+
+# Cache
+.cache/
+*.cache
+
+# Temp files
+*.tmp
+*.temp
+tmp/
+
+# Test outputs
+test_outputs/
+
+# macOS
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/

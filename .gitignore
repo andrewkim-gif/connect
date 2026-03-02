@@ -19,14 +19,19 @@ venv/
 *.log
 nohup.out
 
-# External git repos
+# External git repos (submodules)
 finetune/Qwen3-TTS/
 airi-ref/
-app/
-connect/app/
 davinci-framework/
 finetune/qwen3-tts-repo/
-tts_server/
+
+# Generated/temp data
+finetune/data/
+finetune/data_v*/
+finetune/models/
+tts_test/
+tts_test_app/
+models/
 
 # Secrets
 .env
