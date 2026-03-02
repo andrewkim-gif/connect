@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+venv/
+.venv/
+
+# Models (large files - use Git LFS if needed)
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Audio files
+*.wav
+*.mp3
+
+# Logs
+*.log
+nohup.out
+
+# External git repos
+finetune/Qwen3-TTS/
+airi-ref/
+app/
+connect/app/
+davinci-framework/
+finetune/qwen3-tts-repo/
+tts_server/
+
+# Secrets
+.env
+.env.*
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store

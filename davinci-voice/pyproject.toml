@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "davinci-voice"
+version = "0.1.0"
+description = "Davinci Voice - High-quality Korean TTS with voice cloning"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Davinci Voice Team", email = "team@davincivoice.ai" }
+]
+keywords = [
+    "tts",
+    "text-to-speech",
+    "voice-cloning",
+    "korean-tts",
+    "speech-synthesis",
+    "deep-learning",
+    "pytorch",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "qwen-tts>=0.1.0",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "soundfile>=0.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://huggingface.co/davinci-voice"
+Repository = "https://github.com/davinci-voice/davinci-voice"
+Documentation = "https://huggingface.co/davinci-voice/davinci-voice-12Hz-1.7B-Base"
+
+[tool.hatch.build.targets.wheel]
+packages = ["davinci_voice"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "D", "UP"]
+ignore = ["D100", "D104"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
