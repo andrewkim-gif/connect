@@ -167,7 +167,7 @@ async def handle_voice_input(
         })
 
 
-@router.websocket("/ws/voice/call")
+@router.websocket("/ws/voice")
 async def websocket_voice_call(
     websocket: WebSocket,
     api_key: Optional[str] = Query(default=None, alias="api_key"),
@@ -175,7 +175,7 @@ async def websocket_voice_call(
     """
     실시간 음성통화 WebSocket 엔드포인트
 
-    연결: ws://server:5002/ws/voice/call?api_key=xxx
+    연결: ws://server:5001/ws/voice?api_key=xxx
 
     Client → Server (JSON):
         {
@@ -321,9 +321,11 @@ async def websocket_voice_call(
 
                     # 3. TTS 생성 및 스트리밍
                     try:
+                        # voice_id가 "finetuned"가 아니면 "auto" 사용
+                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else "auto"
                         audio_array, sample_rate, processing_time = await tts_engine.synthesize(
                             text=greeting_text,
-                            voice_id=voice_id,
+                            mode=mode,
                         )
                         if audio_array is not None and connection_manager.get_connection(client_id):
                             # Float32 → Int16 PCM 변환
