@@ -33,6 +33,52 @@ class TTSEngine:
         self._lock = asyncio.Lock()
         self._warmup_done = False
 
+    def _add_tail_silence(
+        self,
+        audio: np.ndarray,
+        sample_rate: int,
+        fade_out_ms: int = FADE_OUT_MS,
+        silence_ms: int = TAIL_SILENCE_MS,
+    ) -> np.ndarray:
+        """
+        오디오 끝에 자연스러운 fade-out + silence tail 추가
+
+        문제: TTS 모델이 문장 끝에서 갑자기 끊김 ("했습니다" → "했습니다-끊김")
+        해결: fade-out으로 자연스럽게 줄이고, silence로 여운 추가
+
+        Args:
+            audio: 원본 오디오 (float32, -1.0 ~ 1.0)
+            sample_rate: 샘플레이트 (24000)
+            fade_out_ms: fade-out 길이 (기본 50ms)
+            silence_ms: tail silence 길이 (기본 150ms)
+
+        Returns:
+            tail이 추가된 오디오 (float32)
+        """
+        if not ENABLE_TAIL_PROCESSING:
+            return audio
+
+        # Fade-out 적용 (자연스러운 볼륨 감소)
+        fade_samples = int(sample_rate * fade_out_ms / 1000)
+        if len(audio) > fade_samples:
+            # 선형 fade-out: 1.0 → 0.0
+            fade_curve = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+            audio = audio.copy()  # 원본 보호
+            audio[-fade_samples:] = audio[-fade_samples:] * fade_curve
+
+        # Silence tail 추가 (여운)
+        silence_samples = int(sample_rate * silence_ms / 1000)
+        silence = np.zeros(silence_samples, dtype=np.float32)
+
+        result = np.concatenate([audio, silence])
+
+        logger.debug(
+            f"Tail added: fade={fade_out_ms}ms, silence={silence_ms}ms, "
+            f"original={len(audio)/sample_rate:.2f}s → final={len(result)/sample_rate:.2f}s"
+        )
+
+        return result
+
     async def warmup(self) -> None:
         """모델 워밍업 (CUDA 커널 컴파일)"""
         if self._warmup_done:
@@ -162,6 +208,12 @@ class TTSEngine:
                 )
 
         audio, sample_rate = result
+
+        # 🔧 FIX: 자연스러운 음성 끝 처리 (tail silence 추가)
+        # 문제: TTS가 문장 끝에서 "툭" 끊김
+        # 해결: fade-out + silence tail로 자연스러운 여운 추가
+        audio = self._add_tail_silence(audio, sample_rate)
+
         processing_time = (time.time() - start_time) * 1000
 
         logger.info(
