@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GD Voice Call - 실시간 음성통화</title>
+    <title>Voice Call - 실시간 음성통화</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -154,7 +154,50 @@
     </style>
 </head>
 <body>
-    <h1>🎤 GD Voice Call</h1>
+    <div class="character-header" id="characterHeader">
+        <a href="/phonebook" class="back-btn">← 전화번호부</a>
+        <div class="character-info">
+            <span class="character-avatar" id="charAvatar">👤</span>
+            <span class="character-name" id="charName">연결 중...</span>
+        </div>
+    </div>
+    <style>
+        .character-header {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .back-btn {
+            color: #aaa;
+            text-decoration: none;
+            font-size: 0.9em;
+            padding: 8px 15px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            transition: all 0.2s;
+        }
+        .back-btn:hover {
+            background: rgba(255,255,255,0.2);
+            color: #fff;
+        }
+        .character-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .character-avatar {
+            font-size: 1.5em;
+        }
+        .character-name {
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+    </style>
+
+    <h1>🎤 Voice Call</h1>
 
     <div id="status" class="status disconnected">연결 중...</div>
 
@@ -647,11 +690,13 @@
 
                 debugEl.textContent = `전송: ${(pcmData.byteLength / 1024).toFixed(1)}KB PCM (${(resampled.length / targetSampleRate).toFixed(2)}s)`;
 
-                // WebSocket으로 전송
+                // WebSocket으로 전송 (캐릭터 정보 포함)
+                const params = new URLSearchParams(window.location.search);
                 ws.send(JSON.stringify({
                     type: 'voice_input',
                     audio: base64,
-                    voice_id: document.getElementById('voiceId').value
+                    voice_id: document.getElementById('voiceId').value,
+                    character: params.get('character') || 'gd'
                 }));
 
             } catch (err) {
@@ -718,7 +763,8 @@
             if (!text || text === '...') return;
             const div = document.createElement('div');
             div.className = `message ${role}`;
-            div.innerHTML = `<div class="label">${role === 'user' ? '나' : 'GD'}</div>${text}`;
+            const charName = currentCharacter ? currentCharacter.name : 'AI';
+            div.innerHTML = `<div class="label">${role === 'user' ? '나' : charName}</div>${text}`;
             conversationEl.appendChild(div);
             conversationEl.scrollTop = conversationEl.scrollHeight;
         }
@@ -750,7 +796,41 @@
             }
         };
 
+        // === 캐릭터 정보 로드 ===
+        let currentCharacter = null;
+
+        async function loadCharacterInfo() {
+            const params = new URLSearchParams(window.location.search);
+            const charId = params.get('character') || 'gd';
+            const voiceMode = params.get('voice_mode') || 'auto';
+
+            // 음성 ID 설정
+            const voiceIdSelect = document.getElementById('voiceId');
+            if (voiceMode === 'finetuned') {
+                voiceIdSelect.value = 'gd-default';
+            } else if (voiceMode === 'icl') {
+                voiceIdSelect.value = 'gd-icl';
+            }
+
+            try {
+                const response = await fetch(`/api/v1/characters/${charId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    currentCharacter = data.character;
+
+                    // UI 업데이트
+                    document.getElementById('charName').textContent = currentCharacter.name;
+                    document.getElementById('charAvatar').textContent =
+                        charId === 'gd' ? '👑' : (charId === 'jhk' ? '👔' : '👤');
+                    document.title = `${currentCharacter.name} - Voice Call`;
+                }
+            } catch (e) {
+                console.error('Failed to load character:', e);
+            }
+        }
+
         // === 초기화 ===
+        loadCharacterInfo();
         connect();
     </script>
 </body>

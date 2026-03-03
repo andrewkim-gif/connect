@@ -11,7 +11,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
 from config import settings
 from services.voice_pipeline import get_voice_pipeline
-from services.voice_pipeline_streaming import get_streaming_voice_pipeline
+from services.voice_pipeline_streaming import get_streaming_voice_pipeline, clean_text_for_tts
+from services.character_registry import get_character_registry
 from core.connection import connection_manager
 from core.rate_limiter import get_rate_limiter
 
@@ -47,6 +48,7 @@ async def handle_voice_input(
     client_id: str,
     audio_base64: str,
     voice_id: Optional[str] = None,
+    character_id: str = "gd",
 ) -> None:
     """
     음성 입력 처리 (STT → LLM → TTS 파이프라인)
@@ -106,6 +108,7 @@ async def handle_voice_input(
             sample_rate=settings.VOICE_CALL_SAMPLE_RATE_IN,
             voice_id=voice_id or "gd-default",
             session_id=client_id,  # 사용자별 세션 격리
+            character_id=character_id,  # 캐릭터별 페르소나 적용
         ):
             # 연결 확인
             if not connection_manager.get_connection(client_id):
@@ -255,33 +258,84 @@ async def websocket_voice_call(
                 if msg_type == "start_call":
                     # 통화 시작 요청 - 클라이언트가 링톤 재생 시작
                     voice_id = data.get("voice_id", "gd-default")
-                    logger.info(f"[{client_id}] Call started with voice_id={voice_id}")
+                    character_id = data.get("character", "gd")
+                    logger.info(f"[{client_id}] Call started with voice_id={voice_id}, character={character_id}")
 
-                    # 1. call_started 응답 (클라이언트가 링톤 재생)
+                    import asyncio
+                    import random
+                    import numpy as np
+                    from services.tts_engine import tts_engine
+
+                    # 캐릭터별 인사말 가져오기
+                    registry = get_character_registry()
+                    character = registry.get(character_id)
+                    if character and character.greetings:
+                        greetings = character.greetings
+                    else:
+                        # Fallback to GD greetings
+                        greetings = [
+                            "오~ 야 오랜만이다! 잘 지냈어?",
+                            "어이~ 왜 전화했어?",
+                            "오 안녕! 무슨 일이야?",
+                            "야~ 웬일이야? 보고 싶었어?",
+                            "어 왜?",
+                            "응 말해봐~",
+                        ]
+                    greeting_text = random.choice(greetings)
+
+                    # 캐릭터별 voice_mode 결정
+                    # 핵심: character_id를 기준으로 voice_mode 결정 (voice_id는 무시)
+                    # voice_id에 명시적으로 "icl" 또는 "finetuned"가 포함된 경우만 우선 적용
+                    if "icl" in voice_id:
+                        voice_mode = "icl"
+                    elif "finetuned" in voice_id and character_id == "gd":
+                        # gd-finetuned는 GD 캐릭터에만 적용
+                        voice_mode = "finetuned"
+                    else:
+                        # 캐릭터 레지스트리 기반 결정 (icl 우선)
+                        if character and character.voice_model_icl:
+                            voice_mode = "icl"
+                        elif character and character.voice_model_finetuned:
+                            voice_mode = "finetuned"
+                        else:
+                            voice_mode = "icl"  # 기본값
+
+                    logger.info(f"[{client_id}] Voice mode: {voice_mode} for character {character_id}")
+
+                    # 1. call_started 응답 (클라이언트가 링톤 재생 시작)
                     await connection_manager.send_json(client_id, {
                         "type": "call_started",
                         "voice_id": voice_id,
                     })
 
-                    # 2. 링톤 시간 후 자동으로 greeting 생성 (2-4초 대기)
-                    import asyncio
-                    import random
+                    # 2. 링톤 재생과 TTS 생성을 병렬로 실행
+                    #    링톤 끝나면 바로 재생할 수 있도록 미리 생성
                     ring_duration = 2.0 + random.random() * 2.0  # 2-4초
-                    await asyncio.sleep(ring_duration)
 
-                    # 3. 인사말 TTS 생성
-                    import numpy as np
-                    from services.tts_engine import tts_engine
+                    async def generate_greeting_tts():
+                        """링톤 재생 중 TTS 미리 생성"""
+                        try:
+                            # TTS용 텍스트 정제 (마크다운, 영어 괄호 주석 제거)
+                            cleaned_greeting = clean_text_for_tts(greeting_text)
+                            audio_array, sample_rate, processing_time = await tts_engine.synthesize(
+                                text=cleaned_greeting,
+                                character_id=character_id,  # 캐릭터 ID 전달!
+                                voice_mode=voice_mode,      # voice_mode 전달!
+                            )
+                            logger.info(f"[{client_id}] Greeting TTS ready: '{cleaned_greeting}' (character={character_id}, mode={voice_mode}, {processing_time:.0f}ms)")
+                            return audio_array, sample_rate, processing_time
+                        except Exception as e:
+                            logger.error(f"[{client_id}] Greeting TTS error: {e}")
+                            return None, None, 0
 
-                    greetings = [
-                        "응~ 안녕? 무슨 일이야?",
-                        "어 안녕! 왜 전화했어?",
-                        "응 나야~ 뭐야?",
-                        "여보세요? 아 안녕!",
-                    ]
-                    greeting_text = random.choice(greetings)
+                    # 병렬 실행: 링톤 대기 + TTS 생성
+                    tts_task = asyncio.create_task(generate_greeting_tts())
+                    await asyncio.sleep(ring_duration)  # 링톤 시간 대기
 
-                    # 응답 시작
+                    # TTS 결과 대기 (이미 완료되었을 가능성 높음)
+                    audio_array, sample_rate, processing_time = await tts_task
+
+                    # 3. 응답 시작 (링톤 끝나면 바로!)
                     await connection_manager.send_json(client_id, {
                         "type": "response_start",
                     })
@@ -293,30 +347,22 @@ async def websocket_voice_call(
                         "is_final": True,
                     })
 
-                    # TTS 생성
-                    try:
-                        mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else ("clone" if voice_id in ["gd-icl", "clone"] else "auto")
-                        audio_array, sample_rate, processing_time = await tts_engine.synthesize(
-                            text=greeting_text,
-                            mode=mode,
-                        )
-                        if audio_array is not None and connection_manager.get_connection(client_id):
-                            # Float32 → Int16 PCM 변환
-                            audio_int16 = (audio_array * 32767).astype(np.int16)
-                            audio_bytes = audio_int16.tobytes()
+                    # 4. 오디오 전송
+                    if audio_array is not None and connection_manager.get_connection(client_id):
+                        # Float32 → Int16 PCM 변환
+                        audio_int16 = (audio_array * 32767).astype(np.int16)
+                        audio_bytes = audio_int16.tobytes()
 
-                            # 청크 단위로 전송 (100ms at 24kHz)
-                            chunk_size = 4800
-                            for i in range(0, len(audio_bytes), chunk_size):
-                                chunk = audio_bytes[i:i+chunk_size]
-                                if connection_manager.get_connection(client_id):
-                                    await connection_manager.send_bytes(client_id, chunk)
-                                else:
-                                    break
+                        # 청크 단위로 전송 (100ms at 24kHz)
+                        chunk_size = 4800
+                        for i in range(0, len(audio_bytes), chunk_size):
+                            chunk = audio_bytes[i:i+chunk_size]
+                            if connection_manager.get_connection(client_id):
+                                await connection_manager.send_bytes(client_id, chunk)
+                            else:
+                                break
 
-                            logger.info(f"[{client_id}] Greeting TTS: '{greeting_text}' ({processing_time:.0f}ms)")
-                    except Exception as e:
-                        logger.error(f"[{client_id}] Greeting TTS error: {e}")
+                        logger.info(f"[{client_id}] Greeting sent: '{greeting_text}'")
 
                     # 응답 완료 + listening 상태로 전환
                     await connection_manager.send_json(client_id, {
@@ -343,6 +389,7 @@ async def websocket_voice_call(
                         client_id=client_id,
                         audio_base64=audio_base64,
                         voice_id=data.get("voice_id"),
+                        character_id=data.get("character", "gd"),
                     )
 
                 elif msg_type == "audio_chunk":
@@ -364,6 +411,7 @@ async def websocket_voice_call(
                             client_id=client_id,
                             audio_base64=combined_audio,
                             voice_id=data.get("voice_id"),
+                            character_id=data.get("character", "gd"),
                         )
                     else:
                         logger.warning(f"[{client_id}] audio_end received but no audio buffer")
@@ -403,14 +451,19 @@ async def websocket_voice_call(
                     from services.tts_engine import tts_engine
 
                     voice_id = data.get("voice_id", "gd-default")
+                    character_id = data.get("character", "gd")
 
-                    # 서버에서 인사말 선택 (클라이언트가 아님!)
-                    greetings = [
-                        "응~ 안녕? 무슨 일이야?",
-                        "어 안녕! 왜 전화했어?",
-                        "응 나야~ 뭐야?",
-                        "여보세요? 아 안녕!",
-                    ]
+                    # 캐릭터별 인사말 가져오기
+                    registry = get_character_registry()
+                    character = registry.get(character_id)
+                    if character and character.greetings:
+                        greetings = character.greetings
+                    else:
+                        greetings = [
+                            "오~ 야 오랜만이다! 잘 지냈어?",
+                            "어이~ 왜 전화했어?",
+                            "오 안녕! 무슨 일이야?",
+                        ]
                     greeting_text = random.choice(greetings)
 
                     # 1. 응답 시작 알림
@@ -427,10 +480,12 @@ async def websocket_voice_call(
 
                     # 3. TTS 생성 및 스트리밍
                     try:
+                        # TTS용 텍스트 정제 (마크다운, 영어 괄호 주석 제거)
+                        cleaned_greeting = clean_text_for_tts(greeting_text)
                         # voice_id가 "finetuned"가 아니면 "auto" 사용
                         mode = "finetuned" if voice_id in ["gd-default", "finetuned"] else ("clone" if voice_id in ["gd-icl", "clone"] else "auto")
                         audio_array, sample_rate, processing_time = await tts_engine.synthesize(
-                            text=greeting_text,
+                            text=cleaned_greeting,
                             mode=mode,
                         )
                         if audio_array is not None and connection_manager.get_connection(client_id):
@@ -460,36 +515,47 @@ async def websocket_voice_call(
                 elif msg_type == "ping":
                     await connection_manager.send_json(client_id, {"type": "pong"})
 
-                elif msg_type == "gd_initiative":
-                    # GD가 먼저 말 걸기 (유저 5초 침묵 시)
-                    logger.info(f"[{client_id}] GD Initiative triggered - user silent for 5s")
+                elif msg_type == "character_initiative":
+                    # 캐릭터가 먼저 말 걸기 (유저 5초 침묵 시)
+                    character_id = data.get("character", "gd")
+                    logger.info(f"[{client_id}] Character ({character_id}) Initiative triggered - user silent for 5s")
 
                     # 스트리밍 파이프라인 직접 사용 (process_text 메서드 필요)
                     streaming_pipeline = get_streaming_voice_pipeline()
 
                     # 이미 처리 중이면 무시 (중복 방지)
                     if streaming_pipeline.is_processing or pipeline.is_processing:
-                        logger.warning(f"[{client_id}] GD Initiative ignored - already processing")
+                        logger.warning(f"[{client_id}] Character Initiative ignored - already processing")
                         await connection_manager.send_json(client_id, {
-                            "type": "gd_initiative_skipped",
+                            "type": "character_initiative_skipped",
                             "reason": "already_processing",
                         })
                         continue
 
-                    # LLM에게 GD가 먼저 말걸도록 프롬프트
-                    gd_prompts = [
-                        "[유저가 5초간 아무 말도 안 합니다. 자연스럽게 대화를 이끌어가세요. 뭐 하냐고 물어보거나, 할 말 없으면 끊어도 된다고 해주세요.]",
-                        "[유저가 말이 없네요. 궁금한 거 있으면 물어보라고 하거나, 심심하면 이야기 해달라고 해보세요.]",
-                    ]
+                    # 캐릭터별 initiative 프롬프트
                     import random
-                    gd_prompt = random.choice(gd_prompts)
+                    registry = get_character_registry()
+                    character = registry.get(character_id)
 
-                    # 파이프라인으로 GD 발화 생성
+                    if character_id == "jhk":
+                        initiative_prompts = [
+                            "[유저가 5초간 아무 말도 안 합니다. 비즈니스 화법으로 자연스럽게 무슨 용건인지 물어보세요.]",
+                            "[유저가 말이 없습니다. 블록체인이나 게임 관련 이야기가 필요한지 물어보세요.]",
+                        ]
+                    else:
+                        initiative_prompts = [
+                            "[유저가 5초간 아무 말도 안 합니다. 자연스럽게 대화를 이끌어가세요. 뭐 하냐고 물어보거나, 할 말 없으면 끊어도 된다고 해주세요.]",
+                            "[유저가 말이 없네요. 궁금한 거 있으면 물어보라고 하거나, 심심하면 이야기 해달라고 해보세요.]",
+                        ]
+                    initiative_prompt = random.choice(initiative_prompts)
+
+                    # 파이프라인으로 캐릭터 발화 생성
                     try:
                         async for event in streaming_pipeline.process_text(
-                            text=gd_prompt,
+                            text=initiative_prompt,
                             voice_id=data.get("voice_id", "gd-default"),
                             session_id=client_id,
+                            character_id=character_id,
                         ):
                             if event.type == "response_start":
                                 await connection_manager.send_json(client_id, {

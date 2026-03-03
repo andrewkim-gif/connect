@@ -27,7 +27,7 @@ from config import settings
 from services.model_manager import model_manager
 from services.voice_manager import voice_manager
 from services.tts_engine import tts_engine
-from api.routes import health, voices, tts
+from api.routes import health, voices, tts, characters
 from api.websocket import stream as ws_stream
 from api.websocket import voice_call as ws_voice_call
 from core.connection import connection_manager
@@ -93,8 +93,11 @@ async def lifespan(app: FastAPI):
         # 3. 음성 프로필 등록 (clone 모드용 - ICL만 사용)
         logger.info("[3/6] Registering voice profile for clone mode (ICL only)...")
 
-        # ICL 모드만 사용 (고품질)
-        gd_ref_text = "네. 네. 또 미체라는 철학과의 사상 중에 가장 대표 되는 개념인데. 신은 동안 저를 좀."
+        # ICL 모드: ref_text는 반드시 샘플 오디오 내용과 일치해야 함
+        # gd_sample_icl.wav: 10초, 24kHz 모노 (004.wav 240-250초 구간)
+        # ref_text는 문장 끝이 깔끔해야 생성된 음성에 잔여 소리가 없음
+        # Whisper large-v3 인식 결과 (2026-03-03)
+        gd_ref_text = "그래서 뭔가 팬베이스가 생기고 조금씩 더 소통할 수 있는 장이 커지다 보니까 여러모로 알아서 그렇게 만들어진 것 같아요."
 
         voice_manager.register_voice(
             voice_id="gd-clone",
@@ -105,12 +108,32 @@ async def lifespan(app: FastAPI):
             ref_text=gd_ref_text,
         )
 
+        # 장현국(JHK) ICL 음성 등록
+        jang_ref_text = "하나가 TVL 이잖아요. Total Value Act. 작년 2024년 2월 기준으로 위믹스가 전세계 12등 이었어요. 5억불로. 솔라나가 5등 이었는데"
+        voice_manager.register_voice(
+            voice_id="jang-clone",
+            name="장현국 (ICL Clone)",
+            mode="icl",
+            description="장현국 ICL 모드 음성 복제",
+            sample_path=settings.JANG_SAMPLE_PATH,
+            ref_text=jang_ref_text,
+        )
+
         # 4. Voice Clone 모델용 프롬프트 캐싱
         if settings.ENABLE_CLONE:
-            logger.info("[4/6] Caching voice prompt for clone mode (ICL)...")
+            logger.info("[4/6] Caching voice prompts for clone mode (ICL)...")
             clone_model = model_manager.get_model("clone")
+
+            # GD 프롬프트 캐싱
             await voice_manager.cache_prompt(
                 voice_id="gd-clone",
+                model=clone_model,
+                prompts_dir=settings.VOICE_PROMPTS_DIR,
+            )
+
+            # 장 프롬프트 캐싱
+            await voice_manager.cache_prompt(
+                voice_id="jang-clone",
                 model=clone_model,
                 prompts_dir=settings.VOICE_PROMPTS_DIR,
             )
@@ -234,6 +257,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 app.include_router(voices.router, prefix="/api/v1/tts", tags=["TTS"])
 app.include_router(tts.router, prefix="/api/v1/tts", tags=["TTS"])
+app.include_router(characters.router, prefix="/api/v1", tags=["Characters"])
 
 # WebSocket 라우터 등록
 app.include_router(ws_stream.router, tags=["WebSocket"])
@@ -242,8 +266,16 @@ app.include_router(ws_voice_call.router, tags=["Voice Call"])
 
 @app.get("/", include_in_schema=False)
 async def root():
-    """루트 리다이렉트"""
-    return {"message": "GD Voice Clone TTS Server", "docs": "/docs", "voice_call": "/voice-call"}
+    """루트 → 전화번호부로 리다이렉트"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/phonebook")
+
+
+@app.get("/phonebook", include_in_schema=False)
+async def phonebook_ui():
+    """전화번호부 UI (첫 화면)"""
+    static_path = os.path.join(os.path.dirname(__file__), "static", "phonebook.html")
+    return FileResponse(static_path, media_type="text/html")
 
 
 @app.get("/voice-call", include_in_schema=False)

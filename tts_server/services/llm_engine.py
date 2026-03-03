@@ -1,9 +1,10 @@
 """
 LLM Engine - 대화 생성 엔진 (Gemini API 기반)
-G-Dragon 페르소나로 응답 생성
+멀티 캐릭터 페르소나 지원
 
 세션 기반 대화 히스토리 관리:
 - 각 클라이언트(session_id)별로 독립적인 대화 기록 유지
+- 캐릭터별 페르소나 시스템 프롬프트 적용
 - 동시 접속 사용자 간 대화 격리
 """
 
@@ -15,12 +16,31 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 
-# G-Dragon 시스템 프롬프트 (컨텍스트 절약을 위해 간결하게)
+# 기본 시스템 프롬프트 (G-Dragon) - fallback용
 GD_SYSTEM_PROMPT = """당신은 G-Dragon입니다. BIGBANG 리더, 한국 대표 아티스트.
 
 성격: 자신감, 솔직함, 유머, 친근함
 말투: 캐주얼한 한국어 ("야", "뭐", "진짜"), 가끔 영어 섞음
 규칙: 항상 GD로 대화. 질문에 2-5문장으로 충분히 대답. 끝까지 문장 완성."""
+
+
+def get_character_prompt(character_id: str) -> tuple[str, str]:
+    """캐릭터별 시스템 프롬프트와 초기 응답 반환"""
+    try:
+        from services.character_registry import get_character_registry
+        registry = get_character_registry()
+        char = registry.get(character_id)
+        if char and char.system_prompt:
+            # 캐릭터별 초기 응답 생성
+            initial_responses = {
+                "gd": "알겠어. 나 GD야. 뭐 물어볼 거 있어? 편하게 말해~",
+                "jhk": "네, 알겠습니다. 편하게 말씀해 주세요.",
+            }
+            return char.system_prompt, initial_responses.get(character_id, "네, 말씀하세요.")
+    except Exception as e:
+        logger.warning(f"Failed to get character prompt for {character_id}: {e}")
+
+    return GD_SYSTEM_PROMPT, "알겠어. 나 GD야. 뭐 물어볼 거 있어? 편하게 말해~"
 
 
 @dataclass
@@ -47,6 +67,7 @@ class SessionState:
     history: List[ChatMessage] = field(default_factory=list)
     last_active: float = field(default_factory=time.time)
     created_at: float = field(default_factory=time.time)
+    character_id: str = "gd"  # 세션의 캐릭터 ID
 
 
 class LLMEngine:
@@ -92,33 +113,44 @@ class LLMEngine:
                 "google-genai 패키지가 필요합니다: pip install google-genai"
             )
 
-    def _get_initial_history(self) -> List[ChatMessage]:
-        """시스템 프롬프트를 포함한 초기 히스토리 생성"""
+    def _get_initial_history(self, character_id: str = "gd") -> List[ChatMessage]:
+        """캐릭터별 시스템 프롬프트를 포함한 초기 히스토리 생성"""
+        system_prompt, initial_response = get_character_prompt(character_id)
         return [
             ChatMessage(
                 role="user",
-                text=f"[시스템 설정]\n{self.config.system_prompt}\n\n이제부터 위 설정대로 대화해줘."
+                text=f"[시스템 설정]\n{system_prompt}\n\n이제부터 위 설정대로 대화해줘."
             ),
             ChatMessage(
                 role="model",
-                text="알겠어. 나 GD야. 뭐 물어볼 거 있어? 편하게 말해~"
+                text=initial_response
             ),
         ]
 
-    def _get_or_create_session(self, session_id: str) -> SessionState:
+    def _get_or_create_session(self, session_id: str, character_id: str = "gd") -> SessionState:
         """세션 조회 또는 생성 (지연 초기화)"""
         now = time.time()
 
         if session_id not in self._sessions:
             self._sessions[session_id] = SessionState(
-                history=self._get_initial_history(),
+                history=self._get_initial_history(character_id),
                 last_active=now,
                 created_at=now,
+                character_id=character_id,
             )
-            logger.info(f"[{session_id}] New LLM session created")
+            logger.info(f"[{session_id}] New LLM session created for character: {character_id}")
         else:
             # 세션 활성 시간 업데이트
             self._sessions[session_id].last_active = now
+            # 캐릭터가 변경된 경우 세션 재생성
+            if self._sessions[session_id].character_id != character_id:
+                logger.info(f"[{session_id}] Character changed: {self._sessions[session_id].character_id} → {character_id}")
+                self._sessions[session_id] = SessionState(
+                    history=self._get_initial_history(character_id),
+                    last_active=now,
+                    created_at=now,
+                    character_id=character_id,
+                )
 
         return self._sessions[session_id]
 
@@ -162,11 +194,11 @@ class LLMEngine:
             session.history = session.history[:2] + session.history[-(max_len - 2):]
             logger.debug(f"[{session_id}] History trimmed to {len(session.history)} messages")
 
-    def _build_contents(self, session_id: str, user_input: str) -> list:
+    def _build_contents(self, session_id: str, user_input: str, character_id: str = "gd") -> list:
         """Gemini API용 contents 리스트 생성 (세션별)"""
         from google.genai import types
 
-        session = self._get_or_create_session(session_id)
+        session = self._get_or_create_session(session_id, character_id)
         contents = []
 
         # 세션별 히스토리
@@ -192,6 +224,7 @@ class LLMEngine:
         self,
         user_input: str,
         session_id: str = "default",
+        character_id: str = "gd",
     ) -> str:
         """
         응답 생성 (비스트리밍, 네이티브 async)
@@ -199,16 +232,17 @@ class LLMEngine:
         Args:
             user_input: 사용자 입력 텍스트
             session_id: 세션 ID (동시 접속 사용자 격리)
+            character_id: 캐릭터 ID (gd, jhk 등)
 
         Returns:
-            GD 페르소나 응답
+            캐릭터 페르소나 응답
         """
         if not self._initialized:
             self.initialize()
 
         from google.genai import types
 
-        contents = self._build_contents(session_id, user_input)
+        contents = self._build_contents(session_id, user_input, character_id)
 
         # 네이티브 async 사용
         # NOTE: gemini-3-flash-preview는 Thinking Mode가 기본 활성화됨
@@ -237,17 +271,20 @@ class LLMEngine:
         self,
         user_input: str,
         session_id: str = "default",
+        character_id: str = "gd",
     ) -> AsyncGenerator[str, None]:
         """
         스트리밍 응답 생성 (네이티브 async)
 
         세션 기반 대화 관리:
         - 각 session_id별로 독립적인 대화 기록 유지
+        - 캐릭터별 페르소나 적용
         - 동시 접속 사용자 간 완전한 격리
 
         Args:
             user_input: 사용자 입력 텍스트
             session_id: 세션 ID (동시 접속 사용자 격리)
+            character_id: 캐릭터 ID (gd, jhk 등)
 
         Yields:
             응답 텍스트 청크
@@ -264,8 +301,8 @@ class LLMEngine:
             if cleaned > 0:
                 logger.info(f"Cleaned up {cleaned} expired sessions")
 
-        session = self._get_or_create_session(session_id)
-        contents = self._build_contents(session_id, user_input)
+        session = self._get_or_create_session(session_id, character_id)
+        contents = self._build_contents(session_id, user_input, character_id)
 
         # 컨텍스트 길이 로깅 (디버깅용)
         total_chars = sum(len(c.parts[0].text) for c in contents if c.parts)

@@ -70,10 +70,12 @@ async def synthesize(
     try:
         # TTS 합성
         # finetuned: 학습된 GD 목소리 사용
-        # clone: ICL 방식 음성 복제 (gd-clone 자동 사용)
+        # clone/icl: 캐릭터별 ICL 방식 음성 복제
         audio, sample_rate, processing_time = await tts_engine.synthesize(
             text=request.text,
             mode=request.mode.value,  # ModelMode enum → str
+            character_id=request.character_id,  # 캐릭터 ID
+            voice_mode=request.voice_mode,  # finetuned 또는 icl
         )
 
         duration = tts_engine.get_audio_duration(audio, sample_rate)

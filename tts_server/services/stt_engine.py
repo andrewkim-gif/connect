@@ -134,10 +134,9 @@ class STTEngine:
             beam_size=self.beam_size,
             vad_filter=True,  # Voice Activity Detection 사용
             vad_parameters={
-                "threshold": 0.3,  # 0.5 → 0.3 (더 민감하게)
-                "min_speech_duration_ms": 150,  # 250 → 150ms (더 짧은 발화도 감지)
-                "min_silence_duration_ms": 800,  # 1000 → 800ms
-                "speech_pad_ms": 200,  # 발화 전후 패딩
+                "threshold": 0.5,
+                "min_speech_duration_ms": 250,
+                "min_silence_duration_ms": 1000,
             },
         )
 
@@ -188,20 +187,6 @@ class STTEngine:
         # bytes → numpy array (int16 → float32)
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
-
-        # 오디오 품질 분석 (디버깅용)
-        audio_duration = len(audio_int16) / sample_rate
-        audio_rms = np.sqrt(np.mean(audio_float32 ** 2))
-        audio_peak = np.abs(audio_float32).max()
-
-        logger.info(
-            f"STT Input: {len(audio_bytes)} bytes, {audio_duration:.2f}s @ {sample_rate}Hz, "
-            f"RMS={audio_rms:.4f}, Peak={audio_peak:.4f}"
-        )
-
-        # 오디오가 너무 조용한 경우 경고
-        if audio_rms < 0.01:
-            logger.warning(f"STT: Audio too quiet (RMS={audio_rms:.4f}), may fail to recognize")
 
         # 리샘플링 필요 시 (16kHz가 아닌 경우)
         if sample_rate != 16000:

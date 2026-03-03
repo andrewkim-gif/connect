@@ -58,6 +58,8 @@ class TTSEngine:
         self,
         text: str,
         mode: str = "auto",  # "finetuned", "clone", "auto"
+        character_id: str = "gd",  # 캐릭터 ID (gd, jhk 등)
+        voice_mode: str = "icl",  # finetuned 또는 icl
     ) -> Tuple[np.ndarray, int, float]:
         """
         텍스트 → 음성 합성
@@ -68,14 +70,22 @@ class TTSEngine:
                 - finetuned: GD v5 학습 모델 (권장)
                 - clone: ICL 방식 실시간 음성 복제
                 - auto: finetuned 우선
+            character_id: 캐릭터 ID (gd, jhk 등)
+            voice_mode: 음성 모드 (finetuned, icl)
 
         Returns:
             (audio_array, sample_rate, processing_time_ms)
         """
         start_time = time.time()
 
-        # 모드 결정
-        resolved_mode = self._resolve_mode(mode)
+        # voice_mode에 따라 mode 결정
+        if voice_mode == "finetuned":
+            resolved_mode = "finetuned"
+        elif voice_mode == "icl":
+            resolved_mode = "clone"
+        else:
+            # 기존 로직 유지
+            resolved_mode = self._resolve_mode(mode)
 
         # 모델 선택
         if resolved_mode == "finetuned":
@@ -97,7 +107,7 @@ class TTSEngine:
             "language": settings.GEN_LANGUAGE,
         }
 
-        logger.debug(f"Synthesis mode={resolved_mode}")
+        logger.debug(f"Synthesis mode={resolved_mode}, character={character_id}, voice_mode={voice_mode}")
 
         # GPU 동시 접근 제한을 위해 lock 사용
         async with self._lock:
@@ -114,8 +124,28 @@ class TTSEngine:
                 )
             else:
                 # Clone 모델: ICL 방식으로 generate_voice_clone() 사용
-                # voice_id 파라미터 무시, 항상 gd-clone (ICL) 사용
-                voice_prompt = voice_manager.get_prompt("gd-clone")
+                # 캐릭터별 voice prompt 선택
+                # character_id -> voice_model_icl 매핑 (character_registry 사용)
+                from services.character_registry import get_character_registry
+                registry = get_character_registry()
+                character = registry.get(character_id)
+
+                if character and character.voice_model_icl:
+                    voice_prompt_id = character.voice_model_icl
+                else:
+                    # 기본값: gd-clone
+                    voice_prompt_id = "gd-clone"
+                    logger.warning(f"No ICL voice model for character '{character_id}', using 'gd-clone'")
+
+                try:
+                    voice_prompt = voice_manager.get_prompt(voice_prompt_id)
+                    logger.info(f"Using voice prompt: {voice_prompt_id}")
+                except (KeyError, RuntimeError) as e:
+                    logger.error(f"Voice prompt '{voice_prompt_id}' not available: {e}")
+                    # gd-clone으로 폴백
+                    voice_prompt = voice_manager.get_prompt("gd-clone")
+                    logger.warning(f"Falling back to 'gd-clone'")
+
                 result = await loop.run_in_executor(
                     None,
                     self._synthesize_voice_clone_sync,

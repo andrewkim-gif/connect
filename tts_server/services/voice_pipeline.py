@@ -75,6 +75,7 @@ class VoicePipeline:
         sample_rate: int = 16000,
         voice_id: Optional[str] = None,
         session_id: str = "default",
+        character_id: str = "gd",
     ) -> AsyncGenerator[PipelineEvent, None]:
         """
         음성 입력 → 음성 출력 파이프라인
@@ -145,8 +146,8 @@ class VoicePipeline:
                 text_buffer = ""
 
                 try:
-                    # session_id로 세션별 대화 기록 격리
-                    async for text_chunk in self.llm.generate_stream(result.text, session_id=session_id):
+                    # session_id로 세션별 대화 기록 격리, character_id로 페르소나 적용
+                    async for text_chunk in self.llm.generate_stream(result.text, session_id=session_id, character_id=character_id):
                         if self._should_interrupt:
                             yield PipelineEvent(type="interrupted")
                             return

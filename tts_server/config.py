@@ -78,8 +78,16 @@ class Settings(BaseSettings):
             os.path.dirname(__file__), "data", "prompts"
         )
     )
-    # GD 음성 샘플 경로 (ICL 클로닝용)
-    GD_SAMPLE_PATH: str = "/home/nexus/connect/server/sample/000.wav"
+    # GD 음성 샘플 경로 (ICL 클로닝용) - 18초 샘플 v2 사용 (51s-69s 구간, 깨끗한 시작)
+    GD_SAMPLE_PATH: str = "/home/nexus/connect/server/sample/gd_sample_icl.wav"
+
+    # === 장(Jang) Voice 설정 ===
+    # Fine-tuned 모델 (훈련 완료 후 활성화)
+    JANG_FINETUNED_MODEL_PATH: str = "/home/nexus/connect/server/finetune/models/jang-voice-v1/checkpoint-epoch-final"
+    JANG_SPEAKER: str = "jang"
+    ENABLE_JANG_FINETUNED: bool = True  # Fine-tuning 완료
+    # ICL 샘플 경로
+    JANG_SAMPLE_PATH: str = "/home/nexus/connect/server/sample/jang_sample_icl.wav"
 
     # === Audio ===
     SAMPLE_RATE: int = 24000

@@ -1,0 +1,12 @@
+{
+  "source_files": [
+    "sample_jang_00.wav"
+  ],
+  "total_source_duration_sec": 1761.0011111111112,
+  "total_chunks": 150,
+  "train_samples": 135,
+  "val_samples": 15,
+  "augmentation": "none",
+  "ref_audio": "/home/nexus/connect/server/finetune/data_jang/chunks/chunk_0047_sample_jang_00.wav",
+  "speaker_name": "jang"
+}

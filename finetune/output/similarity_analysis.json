@@ -1,0 +1,112 @@
+{
+  "original_features": {
+    "mfcc_mean": [
+      -345.1241455078125,
+      106.42096862792968,
+      3.937532734870911,
+      17.60107983648777,
+      -9.653290939331054,
+      -2.3451171040534975,
+      -14.313494205474854,
+      -6.609335041046142,
+      -10.355015659332276,
+      -8.954327249526978,
+      -8.260348701477051,
+      -3.385475453734398,
+      -9.470927906036376
+    ],
+    "pitch_mean": 531.1233428955078,
+    "pitch_std": 630.158837890625,
+    "spectral_centroid_mean": 2397.559134687201
+  },
+  "results": [
+    {
+      "name": "v5 finetuned",
+      "similarity": {
+        "mfcc_similarity": 0.993873304669766,
+        "pitch_similarity": 0.624999732099502,
+        "spectral_similarity": 0.8537198860220132,
+        "overall": 0.8551805491691362
+      },
+      "pitch_mean": 730.2947387695312,
+      "duration": 4.88
+    },
+    {
+      "name": "v5 hello",
+      "similarity": {
+        "mfcc_similarity": 0.9974203667896717,
+        "pitch_similarity": 0.9385403966112165,
+        "spectral_similarity": 0.8941119353290974,
+        "overall": 0.9590946894440202
+      },
+      "pitch_mean": 498.480712890625,
+      "duration": 4.08
+    },
+    {
+      "name": "v5 test 1",
+      "similarity": {
+        "mfcc_similarity": 0.9928161453972777,
+        "pitch_similarity": 0.9718888459488362,
+        "spectral_similarity": 0.8448656109185932,
+        "overall": 0.9569478486670083
+      },
+      "pitch_mean": 546.0538330078125,
+      "duration": 3.2
+    },
+    {
+      "name": "v5 test 2",
+      "similarity": {
+        "mfcc_similarity": 0.9919262642740557,
+        "pitch_similarity": 0.8542997817316247,
+        "spectral_similarity": 0.9156881914625454,
+        "overall": 0.9353907049490243
+      },
+      "pitch_mean": 453.7385559082031,
+      "duration": 5.76
+    },
+    {
+      "name": "v5 long 1",
+      "similarity": {
+        "mfcc_similarity": 0.9805737991206425,
+        "pitch_similarity": 0.9593893470592314,
+        "spectral_similarity": 0.8545246005181216,
+        "overall": 0.949008623781715
+      },
+      "pitch_mean": 509.5540771484375,
+      "duration": 6.4
+    },
+    {
+      "name": "v5 long 2",
+      "similarity": {
+        "mfcc_similarity": 0.9912681099955186,
+        "pitch_similarity": 0.9632248203108764,
+        "spectral_similarity": 0.9632958362333892,
+        "overall": 0.9772606683377001
+      },
+      "pitch_mean": 511.5911865234375,
+      "duration": 7.76
+    },
+    {
+      "name": "base clone",
+      "similarity": {
+        "mfcc_similarity": 0.9947985844739009,
+        "pitch_similarity": 0.6537407295582425,
+        "spectral_similarity": 0.918224886917122,
+        "overall": 0.8771664884878476
+      },
+      "pitch_mean": 715.0297241210938,
+      "duration": 3.84
+    },
+    {
+      "name": "base zeroshot",
+      "similarity": {
+        "mfcc_similarity": 0.9944070705354447,
+        "pitch_similarity": 0.9092849957213777,
+        "spectral_similarity": 0.9349051323535111,
+        "overall": 0.9569700604548379
+      },
+      "pitch_mean": 579.30419921875,
+      "duration": 4.96
+    }
+  ]
+}

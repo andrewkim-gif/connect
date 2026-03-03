@@ -49,6 +49,52 @@ class PipelineEvent:
     metrics: Optional[Dict[str, Any]] = None
 
 
+def clean_text_for_tts(text: str) -> str:
+    """
+    TTS용 텍스트 정제 - 마크다운, 괄호 주석 등 제거
+
+    제거 대상:
+    - **강조** → 강조
+    - *이탤릭* → 이탤릭
+    - (영어 설명) → 제거
+    - [링크](url) → 링크텍스트
+    - `코드` → 코드
+    - # 헤딩 → 헤딩
+
+    사용:
+    - voice_pipeline_streaming.py: LLM 응답 → TTS 전
+    - voice_call.py: 인사말 TTS 전
+    """
+    if not text:
+        return text
+
+    # 1. **볼드** 또는 __볼드__ → 내용만
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r'__([^_]+)__', r'\1', text)
+
+    # 2. *이탤릭* 또는 _이탤릭_ → 내용만
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)
+    text = re.sub(r'_([^_]+)_', r'\1', text)
+
+    # 3. (영어만 있는 괄호) 제거 - 예: (On-chain Data), (Sustainability)
+    # 영어, 숫자, 하이픈, 공백만 포함된 괄호 제거
+    text = re.sub(r'\s*\([A-Za-z0-9\-\s]+\)', '', text)
+
+    # 4. [링크텍스트](url) → 링크텍스트
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+    # 5. `인라인 코드` → 내용만
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+
+    # 6. # 헤딩 마크 제거
+    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+
+    # 7. 연속 공백 정리
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+
 class StreamingVoicePipeline:
     """
     실시간 음성 통화를 위한 스트리밍 파이프라인
@@ -110,6 +156,10 @@ class StreamingVoicePipeline:
             self._llm = get_llm_engine()
         return self._llm
 
+    def _clean_text_for_tts(self, text: str) -> str:
+        """모듈 함수 clean_text_for_tts 위임"""
+        return clean_text_for_tts(text)
+
     def _split_into_chunks(self, text: str, is_first_chunk: bool = False) -> List[str]:
         """
         텍스트를 문장 단위로 분할 (운율 보존 우선)
@@ -121,6 +171,9 @@ class StreamingVoicePipeline:
 
         is_first_chunk=True: 첫 청크도 문장 단위 (단, 길이 제한)
         """
+        # TTS용 텍스트 정제 (마크다운, 영어 괄호 주석 제거)
+        text = self._clean_text_for_tts(text)
+
         chunks = []
         current = ""
 
@@ -166,6 +219,7 @@ class StreamingVoicePipeline:
     async def _tts_worker(
         self,
         voice_id: str,
+        character_id: str,
         metrics: StreamingMetrics,
     ) -> None:
         """TTS 작업자 - 큐에서 텍스트를 받아 TTS 처리"""
@@ -182,21 +236,32 @@ class StreamingVoicePipeline:
 
                 async with self._tts_semaphore:
                     try:
-                        logger.info(f"TTS #{job.index}: '{job.text[:50]}...' ({len(job.text)}자)")
+                        logger.info(f"TTS #{job.index} (character={character_id}): '{job.text[:50]}...' ({len(job.text)}자)")
 
-                        # voice_id를 mode로 변환 (tts_engine.synthesize는 mode 파라미터 사용)
-                        # gd-default/finetuned → finetuned 모드 (v5 파인튜닝 모델)
-                        # gd-icl/clone → clone 모드 (ICL 음성 복제)
-                        # 그 외 → auto (finetuned 우선)
-                        if voice_id in ["gd-default", "finetuned"]:
-                            mode = "finetuned"
-                        elif voice_id in ["gd-icl", "clone"]:
-                            mode = "clone"
+                        # character_id를 기준으로 voice_mode 결정 (핵심!)
+                        # voice_id에 "icl"이 명시된 경우만 우선 적용
+                        # 그 외는 캐릭터 레지스트리 기반 결정
+                        if "icl" in voice_id:
+                            voice_mode = "icl"
+                        elif "finetuned" in voice_id and character_id == "gd":
+                            # finetuned는 GD 캐릭터에만 적용
+                            voice_mode = "finetuned"
                         else:
-                            mode = "auto"
+                            # 캐릭터 레지스트리에서 기본 voice_mode 결정 (icl 우선)
+                            from services.character_registry import get_character_registry
+                            registry = get_character_registry()
+                            character = registry.get(character_id)
+                            if character and character.voice_model_icl:
+                                voice_mode = "icl"
+                            elif character and character.voice_model_finetuned:
+                                voice_mode = "finetuned"
+                            else:
+                                voice_mode = "icl"  # 기본값
+
                         audio, sample_rate, tts_ms = await tts_engine.synthesize(
                             text=job.text,
-                            mode=mode,
+                            character_id=character_id,
+                            voice_mode=voice_mode,
                         )
 
                         # TTFA 측정 (첫 청크)
@@ -225,6 +290,7 @@ class StreamingVoicePipeline:
         sample_rate: int = 16000,
         voice_id: Optional[str] = None,
         session_id: str = "default",
+        character_id: str = "gd",
     ) -> AsyncGenerator[PipelineEvent, None]:
         """
         실시간 음성 처리 파이프라인
@@ -280,8 +346,8 @@ class StreamingVoicePipeline:
             # === 2. LLM + TTS 병렬 처리 ===
             yield PipelineEvent(type="response_start")
 
-            # TTS 워커 시작
-            tts_task = asyncio.create_task(self._tts_worker(voice_id, metrics))
+            # TTS 워커 시작 (character_id 전달)
+            tts_task = asyncio.create_task(self._tts_worker(voice_id, character_id, metrics))
 
             # LLM 스트리밍 + TTS 큐잉
             llm_start = time.time()
@@ -293,7 +359,7 @@ class StreamingVoicePipeline:
             try:
                 first_chunk_sent = False
 
-                async for text_chunk in self.llm.generate_stream(result.text, session_id=session_id):
+                async for text_chunk in self.llm.generate_stream(result.text, session_id=session_id, character_id=character_id):
                     if self._should_interrupt:
                         await self._tts_queue.put(None)
                         yield PipelineEvent(type="interrupted")
@@ -334,10 +400,11 @@ class StreamingVoicePipeline:
                 yield PipelineEvent(type="error", data={"code": "LLM_FAILED", "message": str(e)})
                 return
 
-            # 남은 텍스트 처리
-            if text_buffer.strip():
+            # 남은 텍스트 처리 (TTS용 정제 적용)
+            cleaned_remaining = self._clean_text_for_tts(text_buffer.strip())
+            if cleaned_remaining:
                 await self._tts_queue.put(TTSJob(
-                    text=text_buffer.strip(),
+                    text=cleaned_remaining,
                     index=chunk_index,
                     priority=0,
                 ))
@@ -423,6 +490,7 @@ class StreamingVoicePipeline:
         text: str,
         voice_id: Optional[str] = None,
         session_id: str = "default",
+        character_id: str = "gd",
     ) -> AsyncGenerator[PipelineEvent, None]:
         """
         텍스트 입력 처리 (GD Initiative용 - STT 스킵)
@@ -441,8 +509,8 @@ class StreamingVoicePipeline:
         try:
             yield PipelineEvent(type="response_start")
 
-            # TTS 워커 시작
-            tts_task = asyncio.create_task(self._tts_worker(voice_id, metrics))
+            # TTS 워커 시작 (character_id 전달)
+            tts_task = asyncio.create_task(self._tts_worker(voice_id, character_id, metrics))
 
             # LLM 스트리밍
             llm_start = time.time()
@@ -453,7 +521,7 @@ class StreamingVoicePipeline:
             first_chunk_sent = False
 
             try:
-                async for text_chunk in self.llm.generate_stream(text, session_id=session_id):
+                async for text_chunk in self.llm.generate_stream(text, session_id=session_id, character_id=character_id):
                     if self._should_interrupt:
                         await self._tts_queue.put(None)
                         yield PipelineEvent(type="interrupted")
@@ -490,9 +558,11 @@ class StreamingVoicePipeline:
                 yield PipelineEvent(type="error", data={"code": "LLM_FAILED", "message": str(e)})
                 return
 
-            if text_buffer.strip():
+            # 남은 텍스트 처리 (TTS용 정제 적용)
+            cleaned_remaining = self._clean_text_for_tts(text_buffer.strip())
+            if cleaned_remaining:
                 await self._tts_queue.put(TTSJob(
-                    text=text_buffer.strip(),
+                    text=cleaned_remaining,
                     index=chunk_index,
                     priority=0,
                 ))

@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📞 Voice Call - 전화번호부</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        header p {
+            color: #aaa;
+            font-size: 0.9em;
+        }
+
+        .contacts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 0 5px;
+        }
+        .contacts-header h2 {
+            font-size: 1.2em;
+            color: #fff;
+        }
+        .contacts-header .count {
+            background: rgba(255,255,255,0.1);
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            color: #aaa;
+        }
+
+        .contact-card {
+            background: rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transition: all 0.3s;
+            border: 1px solid transparent;
+        }
+        .contact-card:hover {
+            background: rgba(255,255,255,0.12);
+            border-color: rgba(255,255,255,0.1);
+        }
+        .contact-card.disabled {
+            opacity: 0.5;
+        }
+
+        .avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8em;
+            flex-shrink: 0;
+        }
+        .avatar.gd { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .avatar.jhk { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+
+        .contact-info {
+            flex: 1;
+        }
+        .contact-name {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .contact-desc {
+            font-size: 0.85em;
+            color: #aaa;
+            margin-bottom: 6px;
+        }
+        .contact-greeting {
+            font-size: 0.9em;
+            color: #888;
+            font-style: italic;
+        }
+
+        .contact-status {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 500;
+        }
+        .status-badge.ready {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+        .status-badge.pending {
+            background: rgba(241, 196, 15, 0.2);
+            color: #f1c40f;
+        }
+        .status-badge.disabled {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+
+        .call-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(145deg, #2ecc71, #27ae60);
+            color: white;
+            font-size: 1.3em;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3);
+        }
+        .call-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(46, 204, 113, 0.4);
+        }
+        .call-btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        .call-btn:disabled:hover {
+            transform: none;
+        }
+
+        .voice-mode-select {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+        }
+        .voice-mode-btn {
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: transparent;
+            color: #aaa;
+            font-size: 0.8em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .voice-mode-btn:hover {
+            border-color: rgba(255,255,255,0.4);
+            color: #fff;
+        }
+        .voice-mode-btn.selected {
+            background: rgba(255,255,255,0.15);
+            border-color: #667eea;
+            color: #fff;
+        }
+
+        .add-contact {
+            background: rgba(255,255,255,0.05);
+            border: 2px dashed rgba(255,255,255,0.2);
+            border-radius: 16px;
+            padding: 25px;
+            text-align: center;
+            color: #666;
+            cursor: not-allowed;
+        }
+        .add-contact span {
+            font-size: 2em;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            color: #555;
+            font-size: 0.8em;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #888;
+        }
+        .loading .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: rgba(231, 76, 60, 0.1);
+            border: 1px solid rgba(231, 76, 60, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📞 Voice Call</h1>
+            <p>캐릭터를 선택해서 음성 통화를 시작하세요</p>
+        </header>
+
+        <div class="contacts-header">
+            <h2>연락처</h2>
+            <span class="count" id="contactCount">로딩 중...</span>
+        </div>
+
+        <div id="contactsList">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>캐릭터 목록을 불러오는 중...</p>
+            </div>
+        </div>
+
+        <div class="add-contact">
+            <span>➕</span>
+            <p>새 캐릭터 추가 (Coming Soon)</p>
+        </div>
+
+        <footer>
+            <p>Voice Call v2.0 - Multi-Character System</p>
+        </footer>
+    </div>
+
+    <script>
+        // 서버 주소
+        const API_BASE = window.location.origin;
+
+        // 선택된 음성 모드 저장
+        const selectedModes = {};
+
+        // 캐릭터 목록 로드
+        async function loadCharacters() {
+            const listEl = document.getElementById('contactsList');
+            const countEl = document.getElementById('contactCount');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/characters`);
+                if (!response.ok) throw new Error('API 오류');
+
+                const data = await response.json();
+                const characters = data.characters;
+
+                countEl.textContent = `${data.ready_count}/${data.total_count} 사용 가능`;
+
+                if (characters.length === 0) {
+                    listEl.innerHTML = '<div class="error">등록된 캐릭터가 없습니다</div>';
+                    return;
+                }
+
+                listEl.innerHTML = characters.map(c => renderContactCard(c)).join('');
+
+                // 이벤트 리스너 등록
+                characters.forEach(c => {
+                    selectedModes[c.id] = c.voice_modes[0] || null;
+                    setupCardEvents(c);
+                });
+
+            } catch (error) {
+                console.error('Failed to load characters:', error);
+                listEl.innerHTML = `<div class="error">캐릭터 목록 로드 실패: ${error.message}</div>`;
+            }
+        }
+
+        // 연락처 카드 렌더링
+        function renderContactCard(char) {
+            const isReady = char.status === 'ready';
+            const statusClass = char.status;
+            const statusText = {
+                'ready': '온라인',
+                'pending': '준비 중',
+                'disabled': '비활성'
+            }[char.status] || char.status;
+
+            const voiceModes = char.voice_modes || [];
+            const voiceModeHtml = voiceModes.length > 0 ? `
+                <div class="voice-mode-select" id="modes-${char.id}">
+                    ${voiceModes.map((mode, i) => `
+                        <button class="voice-mode-btn ${i === 0 ? 'selected' : ''}"
+                                data-mode="${mode}"
+                                onclick="selectMode('${char.id}', '${mode}', this)">
+                            ${mode === 'finetuned' ? '🎯 Fine-tuned' : '🔊 ICL'}
+                        </button>
+                    `).join('')}
+                </div>
+            ` : '<div class="voice-mode-select"><span style="color:#666;font-size:0.8em">음성 모델 없음</span></div>';
+
+            return `
+                <div class="contact-card ${isReady ? '' : 'disabled'}" id="card-${char.id}">
+                    <div class="avatar ${char.id}">
+                        ${char.id === 'gd' ? '👑' : '👔'}
+                    </div>
+                    <div class="contact-info">
+                        <div class="contact-name">${char.name}</div>
+                        <div class="contact-desc">${char.description}</div>
+                        <div class="contact-greeting">"${char.greeting_text}"</div>
+                        ${voiceModeHtml}
+                    </div>
+                    <div class="contact-status">
+                        <span class="status-badge ${statusClass}">${statusText}</span>
+                        <button class="call-btn"
+                                id="call-${char.id}"
+                                ${isReady ? '' : 'disabled'}
+                                onclick="startCall('${char.id}')">
+                            📞
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 음성 모드 선택
+        function selectMode(charId, mode, btnEl) {
+            selectedModes[charId] = mode;
+
+            // UI 업데이트
+            const container = document.getElementById(`modes-${charId}`);
+            container.querySelectorAll('.voice-mode-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            btnEl.classList.add('selected');
+        }
+
+        // 카드 이벤트 설정
+        function setupCardEvents(char) {
+            // 추가 이벤트 필요시 여기에
+        }
+
+        // 통화 시작
+        function startCall(charId) {
+            const mode = selectedModes[charId] || 'auto';
+            const voiceId = mode === 'finetuned' ? 'gd-default' : 'gd-icl';
+
+            // voice_call.html로 이동 (캐릭터 정보 전달)
+            const params = new URLSearchParams({
+                character: charId,
+                voice_mode: mode,
+                voice_id: voiceId
+            });
+
+            window.location.href = `/voice-call?${params.toString()}`;
+        }
+
+        // 초기화
+        loadCharacters();
+    </script>
+</body>
+</html>
