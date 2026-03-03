@@ -134,9 +134,10 @@ class STTEngine:
             beam_size=self.beam_size,
             vad_filter=True,  # Voice Activity Detection 사용
             vad_parameters={
-                "threshold": 0.5,
-                "min_speech_duration_ms": 250,
-                "min_silence_duration_ms": 1000,
+                "threshold": 0.3,  # 0.5 → 0.3 (더 민감하게)
+                "min_speech_duration_ms": 150,  # 250 → 150ms (더 짧은 발화도 감지)
+                "min_silence_duration_ms": 800,  # 1000 → 800ms
+                "speech_pad_ms": 200,  # 발화 전후 패딩
             },
         )
 
