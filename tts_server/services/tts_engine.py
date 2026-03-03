@@ -19,6 +19,12 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# === Audio Tail Processing Constants ===
+# 자연스러운 음성 끝 처리를 위한 설정
+TAIL_SILENCE_MS = 150      # tail silence 길이 (ms)
+FADE_OUT_MS = 50           # fade-out 길이 (ms)
+ENABLE_TAIL_PROCESSING = True  # tail 처리 활성화
+
 
 class TTSEngine:
     """TTS 합성 엔진"""

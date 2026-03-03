@@ -78,8 +78,8 @@ class Settings(BaseSettings):
             os.path.dirname(__file__), "data", "prompts"
         )
     )
-    # GD 음성 샘플 경로 (ICL 클로닝용) - 18초 샘플 v2 사용 (51s-69s 구간, 깨끗한 시작)
-    GD_SAMPLE_PATH: str = "/home/nexus/connect/server/sample/gd_sample_icl.wav"
+    # GD 음성 샘플 경로 (ICL 클로닝용) - 12초 샘플 (004.wav 145-157초 구간)
+    GD_SAMPLE_PATH: str = "/home/nexus/connect/server/sample/gd_sample_icl_v2.wav"
 
     # === 장(Jang) Voice 설정 ===
     # Fine-tuned 모델 (훈련 완료 후 활성화)

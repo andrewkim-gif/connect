@@ -94,10 +94,10 @@ async def lifespan(app: FastAPI):
         logger.info("[3/6] Registering voice profile for clone mode (ICL only)...")
 
         # ICL 모드: ref_text는 반드시 샘플 오디오 내용과 일치해야 함
-        # gd_sample_icl.wav: 10초, 24kHz 모노 (004.wav 240-250초 구간)
+        # gd_sample_icl_v2.wav: 12초, 24kHz 모노 (004.wav 145-157초 구간)
         # ref_text는 문장 끝이 깔끔해야 생성된 음성에 잔여 소리가 없음
         # Whisper large-v3 인식 결과 (2026-03-03)
-        gd_ref_text = "그래서 뭔가 팬베이스가 생기고 조금씩 더 소통할 수 있는 장이 커지다 보니까 여러모로 알아서 그렇게 만들어진 것 같아요."
+        gd_ref_text = "아직도 그렇게 생각을 해 주셔서 다시 한 번 놀랍습니다. 안 느낄 수가 없죠. 점점 커지고 있는 것 같고 일단 굉장히 좋은 바람직한 현상이죠."
 
         voice_manager.register_voice(
             voice_id="gd-clone",
